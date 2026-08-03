@@ -9,6 +9,14 @@ const router = Router();
 router.use(authenticate);
 
 router.get(
+  '/stats',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const stats = await friendService.getStats(req.userId!);
+    res.json(stats);
+  })
+);
+
+router.get(
   '/',
   asyncHandler(async (req: AuthRequest, res) => {
     const friends = await friendService.getFriends(req.userId!);

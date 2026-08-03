@@ -217,13 +217,36 @@ class ApiClient {
   getPinnedMessages = (conversationId: string) =>
     this.request(`/messages/${conversationId}/pins`);
 
+  forwardMessage = (messageId: string, targetConversationId: string) =>
+    this.request(`/messages/${messageId}/forward`, {
+      method: 'POST',
+      body: JSON.stringify({ conversationId: targetConversationId }),
+    });
+
+  starMessage = (messageId: string) =>
+    this.request(`/messages/${messageId}/star`, { method: 'POST' });
+
+  unstarMessage = (messageId: string) =>
+    this.request(`/messages/${messageId}/star`, { method: 'DELETE' });
+
+  getStarredMessages = () => this.request('/messages/starred');
+
+  getFriendStats = () =>
+    this.request<{ friendCount: number; pendingReceivedCount: number; pendingSentCount: number }>(
+      '/friends/stats'
+    );
+
   // Notifications
+  getNotificationSummary = () =>
+    this.request<{ notifications: unknown[]; unreadCount: number }>('/notifications/summary');
   getNotifications = () => this.request('/notifications');
   getUnreadCount = () => this.request<{ count: number }>('/notifications/unread-count');
   markNotificationRead = (id: string) =>
     this.request(`/notifications/${id}/read`, { method: 'PATCH' });
   markAllNotificationsRead = () =>
     this.request('/notifications/read-all', { method: 'POST' });
+  deleteNotification = (id: string) =>
+    this.request(`/notifications/${id}`, { method: 'DELETE' });
 }
 
 export const api = new ApiClient();

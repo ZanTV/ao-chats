@@ -3,18 +3,22 @@ import {
   View,
   Text,
   StyleSheet,
+  SectionList,
   FlatList,
   TouchableOpacity,
   TextInput,
   Alert,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../src/components/Avatar';
 import { Button } from '../../src/components/Button';
+import { NotificationBell } from '../../src/components/NotificationPanel';
 import { useSettingsStore } from '../../src/stores/settingsStore';
+import { useNotificationStore } from '../../src/stores/notificationStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
 import { Spacing, BorderRadius } from '../../src/theme';
@@ -34,41 +38,76 @@ interface FriendRequest {
   sender: Friend;
 }
 
-interface SearchUser extends Friend {}
+interface SentRequest {
+  id: string;
+  receiver: Friend;
+}
+
+type Relationship = 'none' | 'friend' | 'pending_sent' | 'pending_received';
+
+interface SearchUser extends Friend {
+  relationship?: Relationship;
+}
+
+type FriendSection =
+  | { key: 'pending_received'; title: string; data: FriendRequest[] }
+  | { key: 'pending_sent'; title: string; data: SentRequest[] }
+  | { key: 'friends'; title: string; data: Friend[] };
 
 export default function FriendsScreen() {
   const { colors, fonts, t } = useSettingsStore();
+  const refreshFriendStats = useNotificationStore((s) => s.refreshFriendStats);
+  const friendsFocus = useNotificationStore((s) => s.friendsFocus);
+  const setFriendsFocus = useNotificationStore((s) => s.setFriendsFocus);
   const [tab, setTab] = useState<'friends' | 'requests' | 'search'>('friends');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [requests, setRequests] = useState<FriendRequest[]>([]);
+  const [sentRequests, setSentRequests] = useState<SentRequest[]>([]);
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [pendingUserIds, setPendingUserIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (friendsFocus === 'requests') {
+      setTab('friends');
+      setFriendsFocus(null);
+    }
+  }, [friendsFocus, setFriendsFocus]);
 
   const loadData = useCallback(async () => {
     try {
-      const [friendsRes, requestsRes] = await Promise.all([
+      const [friendsRes, requestsRes, sentRes] = await Promise.all([
         api.getFriends(),
         api.getPendingRequests(),
+        api.getSentRequests(),
       ]);
       setFriends((friendsRes as { friends: Friend[] }).friends);
       setRequests((requestsRes as { requests: FriendRequest[] }).requests);
+      setSentRequests((sentRes as { requests: SentRequest[] }).requests);
+      await refreshFriendStats();
     } catch {
       // ignore
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [refreshFriendStats]);
 
   useEffect(() => {
     loadData();
-    const unsub = socketService.on('friend:request', () => loadData());
-    return () => unsub();
+    const unsubs = [
+      socketService.on('friend:request', () => loadData()),
+      socketService.on('friend:accepted', () => loadData()),
+    ];
+    return () => unsubs.forEach((u) => u());
   }, [loadData]);
 
   const handleSearch = async (q: string) => {
     setSearchQuery(q);
-    if (q.length < 2) { setSearchResults([]); return; }
+    if (q.length < 2) {
+      setSearchResults([]);
+      return;
+    }
     try {
       const result = await api.searchUsers(q) as { users: SearchUser[] };
       setSearchResults(result.users);
@@ -77,10 +116,26 @@ export default function FriendsScreen() {
     }
   };
 
+  const getRelationship = (user: SearchUser): Relationship => {
+    if (user.relationship) return user.relationship;
+    if (pendingUserIds.has(user.id)) return 'pending_sent';
+    if (friends.some((f) => f.id === user.id)) return 'friend';
+    if (requests.some((r) => r.sender.id === user.id)) return 'pending_received';
+    if (sentRequests.some((r) => r.receiver.id === user.id)) return 'pending_sent';
+    return 'none';
+  };
+
   const handleSendRequest = async (userId: string) => {
     try {
       await api.sendFriendRequest(userId);
-      Alert.alert('Success', 'Friend request sent');
+      setPendingUserIds((prev) => new Set(prev).add(userId));
+      setSearchResults((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, relationship: 'pending_sent' as const } : u))
+      );
+      await loadData();
+      if (Platform.OS !== 'web') {
+        Alert.alert('Success', t.friends.requestSent);
+      }
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : t.common.error);
     }
@@ -104,8 +159,58 @@ export default function FriendsScreen() {
     }
   };
 
-  const renderFriend = ({ item }: { item: Friend }) => (
-    <TouchableOpacity style={[styles.item, { backgroundColor: colors.surface }]} onPress={() => handleStartChat(item.id)}>
+  const friendSections: FriendSection[] = [
+    ...(requests.length > 0
+      ? [{ key: 'pending_received' as const, title: t.friends.pendingIncoming, data: requests }]
+      : []),
+    ...(sentRequests.length > 0
+      ? [{ key: 'pending_sent' as const, title: t.friends.pendingOutgoing, data: sentRequests }]
+      : []),
+    { key: 'friends' as const, title: t.friends.yourFriends, data: friends },
+  ];
+
+  const renderSearchActions = (item: SearchUser) => {
+    const relationship = getRelationship(item);
+
+    if (relationship === 'friend') {
+      return (
+        <Button title={t.friends.startChat} onPress={() => handleStartChat(item.id)} size="sm" />
+      );
+    }
+
+    if (relationship === 'pending_sent' || relationship === 'pending_received') {
+      return (
+        <View style={styles.searchActions}>
+          <View style={[styles.pendingPill, { backgroundColor: colors.warning + '20' }]}>
+            <Text style={{ color: colors.warning, fontSize: fonts.xs, fontWeight: '600' }}>
+              {t.friends.pendingLabel}
+            </Text>
+          </View>
+          <Button
+            title={t.friends.startChat}
+            onPress={() => handleStartChat(item.id)}
+            size="sm"
+            variant="outline"
+          />
+        </View>
+      );
+    }
+
+    return (
+      <Button
+        title={t.friends.addFriend}
+        onPress={() => handleSendRequest(item.id)}
+        size="sm"
+        variant="outline"
+      />
+    );
+  };
+
+  const renderFriend = (item: Friend) => (
+    <TouchableOpacity
+      style={[styles.item, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      onPress={() => handleStartChat(item.id)}
+    >
       <Avatar avatarId={item.avatarId} size={48} showOnline isOnline={item.status === 'ONLINE'} />
       <View style={styles.itemContent}>
         <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]}>
@@ -121,18 +226,31 @@ export default function FriendsScreen() {
     </TouchableOpacity>
   );
 
-  const renderRequest = ({ item }: { item: FriendRequest }) => (
-    <View style={[styles.item, { backgroundColor: colors.surface }]}>
+  const renderPendingReceived = (item: FriendRequest) => (
+    <View style={[styles.item, styles.pendingItem, { backgroundColor: colors.surface, borderColor: colors.primary + '30' }]}>
       <Avatar avatarId={item.sender.avatarId} size={48} />
       <View style={styles.itemContent}>
-        <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]}>
-          {item.sender.firstName} {item.sender.lastName}
-        </Text>
+        <View style={styles.pendingRow}>
+          <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]}>
+            {item.sender.firstName} {item.sender.lastName}
+          </Text>
+          <View style={[styles.pendingPill, { backgroundColor: colors.primary + '15' }]}>
+            <Text style={{ color: colors.primary, fontSize: fonts.xs, fontWeight: '600' }}>
+              {t.friends.pendingLabel}
+            </Text>
+          </View>
+        </View>
         <Text style={[styles.itemSub, { color: colors.textSecondary, fontSize: fonts.sm }]}>
-          @{item.sender.username}
+          @{item.sender.username} · {t.friends.wantsToBeFriend}
         </Text>
       </View>
       <View style={styles.requestActions}>
+        <TouchableOpacity
+          style={[styles.actionBtn, { backgroundColor: colors.primary + '15' }]}
+          onPress={() => handleStartChat(item.sender.id)}
+        >
+          <Ionicons name="chatbubble-outline" size={18} color={colors.primary} />
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionBtn, { backgroundColor: colors.success + '20' }]}
           onPress={() => handleRespond(item.id, true)}
@@ -149,31 +267,60 @@ export default function FriendsScreen() {
     </View>
   );
 
-  const renderSearchResult = ({ item }: { item: SearchUser }) => {
-    const isFriend = friends.some((f) => f.id === item.id);
-    return (
-      <View style={[styles.item, { backgroundColor: colors.surface }]}>
-        <Avatar avatarId={item.avatarId} size={48} />
-        <View style={styles.itemContent}>
+  const renderPendingSent = (item: SentRequest) => (
+    <View style={[styles.item, styles.pendingItem, { backgroundColor: colors.surface, borderColor: colors.warning + '30' }]}>
+      <Avatar avatarId={item.receiver.avatarId} size={48} />
+      <View style={styles.itemContent}>
+        <View style={styles.pendingRow}>
           <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]}>
-            {item.firstName} {item.lastName}
+            {item.receiver.firstName} {item.receiver.lastName}
           </Text>
-          <Text style={[styles.itemSub, { color: colors.textSecondary, fontSize: fonts.sm }]}>
-            @{item.username} {item.university ? `· ${item.university}` : ''}
-          </Text>
+          <View style={[styles.pendingPill, { backgroundColor: colors.warning + '20' }]}>
+            <Text style={{ color: colors.warning, fontSize: fonts.xs, fontWeight: '600' }}>
+              {t.friends.pendingLabel}
+            </Text>
+          </View>
         </View>
-        {!isFriend && (
-          <Button title={t.friends.addFriend} onPress={() => handleSendRequest(item.id)} size="sm" variant="outline" />
-        )}
+        <Text style={[styles.itemSub, { color: colors.textSecondary, fontSize: fonts.sm }]}>
+          @{item.receiver.username} · {t.friends.waitingForAccept}
+        </Text>
       </View>
-    );
+      <Button title={t.friends.startChat} onPress={() => handleStartChat(item.receiver.id)} size="sm" variant="outline" />
+    </View>
+  );
+
+  const renderSearchResult = ({ item }: { item: SearchUser }) => (
+    <View style={[styles.item, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Avatar avatarId={item.avatarId} size={48} />
+      <View style={styles.itemContent}>
+        <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]}>
+          {item.firstName} {item.lastName}
+        </Text>
+        <Text style={[styles.itemSub, { color: colors.textSecondary, fontSize: fonts.sm }]}>
+          @{item.username} {item.university ? `· ${item.university}` : ''}
+        </Text>
+      </View>
+      {renderSearchActions(item)}
+    </View>
+  );
+
+  const renderSectionItem = ({ item, section }: { item: FriendRequest | SentRequest | Friend; section: FriendSection }) => {
+    if (section.key === 'pending_received') return renderPendingReceived(item as FriendRequest);
+    if (section.key === 'pending_sent') return renderPendingSent(item as SentRequest);
+    return renderFriend(item as Friend);
   };
+
+  const friendsEmpty =
+    requests.length === 0 && sentRequests.length === 0 && friends.length === 0;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <Text style={[styles.title, { color: colors.text, fontSize: fonts.title }]}>
-        {t.friends.title}
-      </Text>
+      <View style={styles.titleRow}>
+        <Text style={[styles.title, { color: colors.text, fontSize: fonts.title }]}>
+          {t.friends.title}
+        </Text>
+        <NotificationBell />
+      </View>
 
       <View style={styles.tabs}>
         {(['friends', 'requests', 'search'] as const).map((tabKey) => (
@@ -208,40 +355,148 @@ export default function FriendsScreen() {
         </View>
       )}
 
-      <FlatList
-        data={tab === 'friends' ? friends : tab === 'requests' ? requests : searchResults}
-        renderItem={tab === 'friends' ? renderFriend : tab === 'requests' ? renderRequest : renderSearchResult}
-        keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData(); }} tintColor={colors.primary} />}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="people-outline" size={64} color={colors.textTertiary} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              {tab === 'friends' ? t.friends.noFriends : t.common.noResults}
-            </Text>
-          </View>
-        }
-      />
+      {tab === 'friends' ? (
+        <SectionList
+          sections={friendSections}
+          keyExtractor={(item, index) => ('id' in item ? item.id : String(index))}
+          renderItem={renderSectionItem}
+          renderSectionHeader={({ section }) =>
+            section.data.length > 0 ? (
+              <View style={[styles.sectionHeader, { backgroundColor: colors.background }]}>
+                <Text style={[styles.sectionTitle, { color: colors.textSecondary, fontSize: fonts.sm }]}>
+                  {section.title}
+                </Text>
+                {section.key === 'pending_received' && (
+                  <Text style={{ color: colors.textTertiary, fontSize: fonts.xs }}>
+                    {section.data.length}
+                  </Text>
+                )}
+              </View>
+            ) : null
+          }
+          stickySectionHeadersEnabled={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                loadData();
+              }}
+              tintColor={colors.primary}
+            />
+          }
+          ListEmptyComponent={
+            friendsEmpty ? (
+              <View style={styles.empty}>
+                <Ionicons name="people-outline" size={64} color={colors.textTertiary} />
+                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                  {t.friends.noFriends}
+                </Text>
+                <Button title={t.friends.findFriends} onPress={() => setTab('search')} variant="outline" />
+              </View>
+            ) : null
+          }
+          contentContainerStyle={friendsEmpty ? styles.emptyContainer : undefined}
+        />
+      ) : tab === 'requests' ? (
+        <FlatList
+          data={requests}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => renderPendingReceived(item)}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                loadData();
+              }}
+              tintColor={colors.primary}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Ionicons name="mail-open-outline" size={64} color={colors.textTertiary} />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                {t.friends.noPendingRequests}
+              </Text>
+            </View>
+          }
+        />
+      ) : (
+        <FlatList
+          data={searchResults}
+          renderItem={renderSearchResult}
+          keyExtractor={(item) => item.id}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Ionicons name="search-outline" size={64} color={colors.textTertiary} />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                {searchQuery.length < 2 ? t.friends.searchHint : t.common.noResults}
+              </Text>
+            </View>
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  title: { fontWeight: '700', paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+  },
+  title: { fontWeight: '700' },
   tabs: { flexDirection: 'row', paddingHorizontal: Spacing.lg, marginTop: Spacing.md, marginBottom: Spacing.sm },
   tab: { flex: 1, alignItems: 'center', paddingVertical: Spacing.sm, flexDirection: 'row', justifyContent: 'center', gap: 4 },
   tabText: { fontWeight: '600' },
   tabBadge: { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   tabBadgeText: { color: '#FFF', fontSize: 10, fontWeight: '700' },
-  searchBar: { flexDirection: 'row', alignItems: 'center', marginHorizontal: Spacing.lg, marginBottom: Spacing.sm, paddingHorizontal: Spacing.md, borderRadius: BorderRadius.md, borderWidth: 1, height: 44, gap: Spacing.sm },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    height: 44,
+    gap: Spacing.sm,
+  },
   searchInput: { flex: 1 },
-  item: { flexDirection: 'row', alignItems: 'center', padding: Spacing.md, paddingHorizontal: Spacing.lg, gap: Spacing.md },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.xs,
+  },
+  sectionTitle: { fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    gap: Spacing.md,
+  },
+  pendingItem: { borderWidth: 1.5 },
   itemContent: { flex: 1 },
   itemName: { fontWeight: '600' },
-  itemSub: {},
+  itemSub: { marginTop: 2 },
+  pendingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flexWrap: 'wrap' },
   requestActions: { flexDirection: 'row', gap: Spacing.sm },
+  searchActions: { alignItems: 'flex-end', gap: Spacing.xs },
+  pendingPill: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
   actionBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  empty: { alignItems: 'center', paddingTop: 80 },
-  emptyText: { marginTop: Spacing.md, fontSize: 16 },
+  empty: { alignItems: 'center', paddingTop: 80, gap: Spacing.md },
+  emptyContainer: { flexGrow: 1 },
+  emptyText: { fontSize: 16, textAlign: 'center', paddingHorizontal: Spacing.lg },
 });

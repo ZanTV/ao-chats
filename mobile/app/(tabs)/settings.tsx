@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
+import { useNotificationStore } from '../../src/stores/notificationStore';
 import { Avatar } from '../../src/components/Avatar';
 import { ThemeMode, FontSizeMode, Language } from '../../src/theme';
 import { Spacing, BorderRadius } from '../../src/theme';
@@ -13,6 +14,7 @@ import { api } from '../../src/services/api';
 export default function SettingsScreen() {
   const { logout } = useAuthStore();
   const { colors, fonts, t, theme, fontSize, language, setTheme, setFontSize, setLanguage } = useSettingsStore();
+  const { unreadCount, setPanelOpen } = useNotificationStore();
   const [openingSupport, setOpeningSupport] = useState(false);
 
   const handleAoManagerChat = async () => {
@@ -92,6 +94,25 @@ export default function SettingsScreen() {
               colors={colors}
             />
           ))}
+        </Section>
+
+        <Section title={t.settings.notifications} colors={colors} fonts={fonts}>
+          <TouchableOpacity
+            style={[styles.linkRow, { borderBottomColor: colors.border }]}
+            onPress={() => setPanelOpen(true)}
+          >
+            <Ionicons name="notifications-outline" size={22} color={colors.text} />
+            <Text style={[styles.linkText, { color: colors.text, fontSize: fonts.md }]}>
+              {t.notifications.title}
+            </Text>
+            {unreadCount > 0 ? (
+              <View style={[styles.notifBadge, { backgroundColor: colors.danger }]}>
+                <Text style={styles.notifBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+              </View>
+            ) : (
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            )}
+          </TouchableOpacity>
         </Section>
 
         <Section title={t.settings.support} colors={colors} fonts={fonts}>
@@ -206,6 +227,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   linkText: { flex: 1, fontWeight: '500' },
+  notifBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  notifBadgeText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
   supportText: { flex: 1 },
   supportTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   supportSubtitle: { marginTop: 2 },

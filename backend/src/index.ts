@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { config } from './config';
 import { parseCorsOrigins } from './config/cors';
@@ -10,6 +9,7 @@ import { prisma } from './config/database';
 import { verifyEmailTransport } from './utils/email.utils';
 import { ensureAoManagerAccount } from './services/ao-manager.service';
 import { errorHandler } from './middleware/errorHandler';
+import { authLimiter, apiLimiter } from './middleware/rateLimit';
 import { setupSocketIO, setIO } from './sockets';
 
 import authRoutes from './modules/auth/auth.routes';
@@ -48,14 +48,8 @@ app.use(
 
 app.use(express.json({ limit: '1mb' }));
 
-const limiter = rateLimit({
-  windowMs: config.rateLimit.windowMs,
-  max: config.rateLimit.max,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later' },
-});
-app.use('/api/', limiter);
+app.use('/api/auth', authLimiter);
+app.use('/api/', apiLimiter);
 
 app.get('/health', async (_req, res) => {
   let dbOk = false;

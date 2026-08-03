@@ -8,9 +8,14 @@ export interface ChatMessage {
   reactions: Array<{ emoji: string; userId: string; user: { firstName: string } }>;
   readAt?: string;
   deliveredAt?: string;
+  waitingAt?: string;
+  status?: 'SENT' | 'WAITING' | 'DELIVERED' | 'READ';
   createdAt: string;
   isDeleted?: boolean;
   deletedForAll?: boolean;
+  isForwarded?: boolean;
+  forwardedFromId?: string;
+  isStarred?: boolean;
   pending?: boolean;
   failed?: boolean;
 }
@@ -49,7 +54,7 @@ export function upsertMessage(
 
   const idx = next.findIndex((m) => m.id === merged.id);
   if (idx >= 0) {
-    next[idx] = merged;
+    next[idx] = { ...next[idx], ...merged };
     return dedupeMessages(next);
   }
 
@@ -57,6 +62,7 @@ export function upsertMessage(
 }
 
 export function normalizeMessage(raw: Record<string, unknown>): ChatMessage {
+  const stars = raw.stars as Array<{ id: string }> | undefined;
   return {
     id: String(raw.id),
     content: String(raw.content ?? ''),
@@ -67,8 +73,13 @@ export function normalizeMessage(raw: Record<string, unknown>): ChatMessage {
     reactions: (raw.reactions as ChatMessage['reactions']) || [],
     readAt: raw.readAt ? String(raw.readAt) : undefined,
     deliveredAt: raw.deliveredAt ? String(raw.deliveredAt) : undefined,
+    waitingAt: raw.waitingAt ? String(raw.waitingAt) : undefined,
+    status: raw.status as ChatMessage['status'],
     createdAt: String(raw.createdAt ?? new Date().toISOString()),
     isDeleted: Boolean(raw.isDeleted),
     deletedForAll: Boolean(raw.deletedForAll),
+    isForwarded: Boolean(raw.isForwarded),
+    forwardedFromId: raw.forwardedFromId as string | undefined,
+    isStarred: Boolean(raw.isStarred) || (stars?.length ?? 0) > 0,
   };
 }

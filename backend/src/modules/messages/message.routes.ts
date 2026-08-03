@@ -18,6 +18,14 @@ const router = Router();
 router.use(authenticate);
 
 router.get(
+  '/starred',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const stars = await messageService.getStarredMessages(req.userId!);
+    res.json({ stars });
+  })
+);
+
+router.get(
   '/:conversationId',
   asyncHandler(async (req: AuthRequest, res) => {
     const { cursor, limit } = req.query;
@@ -63,6 +71,22 @@ router.post(
       req.body.tempId
     );
     res.status(201).json({ message });
+  })
+);
+
+router.post(
+  '/:messageId/star',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const star = await messageService.starMessage(paramId(req.params.messageId), req.userId!);
+    res.status(201).json(star);
+  })
+);
+
+router.delete(
+  '/:messageId/star',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const result = await messageService.unstarMessage(paramId(req.params.messageId), req.userId!);
+    res.json(result);
   })
 );
 

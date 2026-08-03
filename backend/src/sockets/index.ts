@@ -8,7 +8,7 @@ import { getRedis, CacheKeys } from '../config/redis';
 import { messageService } from '../modules/messages/message.service';
 import { conversationService } from '../modules/conversations/conversation.service';
 import { emitConversationUpdated } from './conversation.events';
-import { createAndDispatchMessage } from './message.dispatch';
+import { createAndDispatchMessage, deliverPendingMessages, emitMessageStatus } from './message.dispatch';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -49,6 +49,7 @@ export function setupSocketIO(httpServer: HttpServer): Server {
 
       if (!user || !user.emailVerified) return next(new Error('Unauthorized'));
       socket.userId = user.id;
+      socket.data.userId = user.id;
       next();
     } catch {
       next(new Error('Invalid token'));
@@ -75,8 +76,32 @@ export function setupSocketIO(httpServer: HttpServer): Server {
 
     socket.broadcast.emit('user:online', { userId });
 
-    socket.on('conversation:join', (conversationId: string) => {
+    try {
+      const participations = await prisma.participant.findMany({
+        where: { userId },
+        select: { conversationId: true },
+      });
+      for (const p of participations) {
+        const promoted = await messageService.promoteWaitingToSent(p.conversationId, userId);
+        if (promoted > 0) {
+          io.to(`conversation:${p.conversationId}`).emit('message:status:refresh', {
+            conversationId: p.conversationId,
+            recipientOnline: true,
+          });
+        }
+      }
+    } catch {
+      // non-blocking
+    }
+
+    socket.on('conversation:join', async (conversationId: string) => {
       socket.join(`conversation:${conversationId}`);
+      try {
+        await deliverPendingMessages(io, conversationId, userId);
+        await messageService.promoteWaitingToSent(conversationId, userId);
+      } catch {
+        // non-blocking
+      }
     });
 
     socket.on('conversation:leave', (conversationId: string) => {
@@ -109,22 +134,30 @@ export function setupSocketIO(httpServer: HttpServer): Server {
     });
 
     socket.on('message:read', async (data: { conversationId: string; messageIds?: string[] }) => {
-      await conversationService.markAsRead(data.conversationId, userId);
+      const result = await conversationService.markAsRead(data.conversationId, userId);
 
       io.to(`conversation:${data.conversationId}`).emit('message:read', {
         conversationId: data.conversationId,
         userId,
-        readAt: new Date(),
+        readAt: result.readAt,
+      });
+
+      io.to(`conversation:${data.conversationId}`).emit('message:status:bulk', {
+        conversationId: data.conversationId,
+        status: 'READ',
+        readAt: result.readAt,
+        readerId: userId,
       });
 
       await emitConversationUpdated(io, data.conversationId);
     });
 
     socket.on('message:delivered', async (data: { messageId: string; conversationId: string }) => {
-      await messageService.markDelivered(data.messageId);
-      io.to(`conversation:${data.conversationId}`).emit('message:delivered', {
+      const deliveredAt = await messageService.markDelivered(data.messageId);
+      emitMessageStatus(io, data.conversationId, {
         messageId: data.messageId,
-        deliveredAt: new Date(),
+        status: 'DELIVERED',
+        deliveredAt,
       });
     });
 
@@ -223,6 +256,31 @@ export function setupSocketIO(httpServer: HttpServer): Server {
       await messageService.unpinMessage(data.messageId, data.conversationId, userId);
       io.to(`conversation:${data.conversationId}`).emit('message:unpin', {
         messageId: data.messageId,
+      });
+    });
+
+    socket.on('message:star', async (data: { messageId: string; conversationId: string }) => {
+      try {
+        const star = await messageService.starMessage(data.messageId, userId);
+        io.to(`conversation:${data.conversationId}`).emit('message:star', {
+          messageId: data.messageId,
+          userId,
+          starred: true,
+          star,
+        });
+      } catch (err) {
+        socket.emit('message:error', {
+          error: err instanceof Error ? err.message : 'Failed to star',
+        });
+      }
+    });
+
+    socket.on('message:unstar', async (data: { messageId: string; conversationId: string }) => {
+      await messageService.unstarMessage(data.messageId, userId);
+      io.to(`conversation:${data.conversationId}`).emit('message:star', {
+        messageId: data.messageId,
+        userId,
+        starred: false,
       });
     });
 

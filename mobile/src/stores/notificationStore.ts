@@ -1,0 +1,158 @@
+import { create } from 'zustand';
+import { api } from '../services/api';
+import { socketService } from '../services/socket';
+
+export interface AppNotification {
+  id: string;
+  type: 'FRIEND_REQUEST' | 'FRIEND_ACCEPTED' | 'NEW_MESSAGE' | 'MENTION';
+  title: string;
+  body: string;
+  isRead: boolean;
+  createdAt: string;
+  actorId?: string | null;
+  data?: {
+    requestId?: string;
+    conversationId?: string;
+  } | null;
+  actor?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    avatarId: string;
+  } | null;
+}
+
+interface FriendStats {
+  friendCount: number;
+  pendingReceivedCount: number;
+  pendingSentCount: number;
+}
+
+interface NotificationState {
+  notifications: AppNotification[];
+  unreadCount: number;
+  friendStats: FriendStats;
+  panelOpen: boolean;
+  loading: boolean;
+  friendsFocus: 'friends' | 'requests' | null;
+  setPanelOpen: (open: boolean) => void;
+  setFriendsFocus: (focus: 'friends' | 'requests' | null) => void;
+  refresh: () => Promise<void>;
+  refreshFriendStats: () => Promise<void>;
+  markRead: (id: string) => Promise<void>;
+  markAllRead: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+  initialize: () => () => void;
+}
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let statsTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleRefresh(fn: () => void, delay = 400) {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(fn, delay);
+}
+
+function scheduleStatsRefresh(fn: () => void, delay = 600) {
+  if (statsTimer) clearTimeout(statsTimer);
+  statsTimer = setTimeout(fn, delay);
+}
+
+export const useNotificationStore = create<NotificationState>((set, get) => ({
+  notifications: [],
+  unreadCount: 0,
+  friendStats: { friendCount: 0, pendingReceivedCount: 0, pendingSentCount: 0 },
+  panelOpen: false,
+  loading: false,
+  friendsFocus: null,
+
+  setPanelOpen: (open) => set({ panelOpen: open }),
+  setFriendsFocus: (focus) => set({ friendsFocus: focus }),
+
+  refresh: async () => {
+    try {
+      set({ loading: true });
+      const summary = await api.getNotificationSummary() as {
+        notifications: AppNotification[];
+        unreadCount: number;
+      };
+      set({
+        notifications: summary.notifications,
+        unreadCount: summary.unreadCount,
+      });
+    } catch {
+      // keep cached
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  refreshFriendStats: async () => {
+    try {
+      const stats = await api.getFriendStats() as FriendStats;
+      set({ friendStats: stats });
+    } catch {
+      // ignore
+    }
+  },
+
+  markRead: async (id) => {
+    await api.markNotificationRead(id);
+    set((state) => ({
+      notifications: state.notifications.map((n) =>
+        n.id === id ? { ...n, isRead: true } : n
+      ),
+      unreadCount: Math.max(0, state.unreadCount - 1),
+    }));
+  },
+
+  markAllRead: async () => {
+    await api.markAllNotificationsRead();
+    set((state) => ({
+      notifications: state.notifications.map((n) => ({ ...n, isRead: true })),
+      unreadCount: 0,
+    }));
+  },
+
+  deleteNotification: async (id) => {
+    await api.deleteNotification(id);
+    set((state) => {
+      const removed = state.notifications.find((n) => n.id === id);
+      return {
+        notifications: state.notifications.filter((n) => n.id !== id),
+        unreadCount: removed && !removed.isRead
+          ? Math.max(0, state.unreadCount - 1)
+          : state.unreadCount,
+      };
+    });
+  },
+
+  initialize: () => {
+    get().refresh();
+    get().refreshFriendStats();
+
+    const bumpUnread = () => {
+      set((state) => ({ unreadCount: state.unreadCount + 1 }));
+      scheduleRefresh(() => get().refresh());
+    };
+
+    const unsubs = [
+      socketService.on('notification:new', () => {
+        bumpUnread();
+        scheduleStatsRefresh(() => get().refreshFriendStats());
+      }),
+      socketService.on('friend:request', () => {
+        scheduleStatsRefresh(() => get().refreshFriendStats());
+      }),
+      socketService.on('friend:accepted', () => {
+        scheduleStatsRefresh(() => get().refreshFriendStats());
+      }),
+    ];
+
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      if (statsTimer) clearTimeout(statsTimer);
+      unsubs.forEach((u) => u());
+    };
+  },
+}));

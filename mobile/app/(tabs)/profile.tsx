@@ -17,11 +17,15 @@ import { ProfileSection, ProfileField } from '../../src/components/ProfileSectio
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { formatDate, formatLastSeen } from '../../src/utils/profile';
+import { useNotificationStore } from '../../src/stores/notificationStore';
+import { NotificationBell } from '../../src/components/NotificationPanel';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 export default function ProfileScreen() {
   const { user, refreshProfile, logout } = useAuthStore();
   const { colors, fonts, t } = useSettingsStore();
+  const friendStats = useNotificationStore((s) => s.friendStats);
+  const refreshFriendStats = useNotificationStore((s) => s.refreshFriendStats);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
@@ -31,13 +35,15 @@ export default function ProfileScreen() {
       if (!ok && !useAuthStore.getState().user) {
         setLoadError(true);
       }
+      refreshFriendStats();
     })();
-  }, []);
+  }, [refreshProfile, refreshFriendStats]);
 
   const onRefresh = async () => {
     setRefreshing(true);
     setLoadError(false);
     const ok = await refreshProfile();
+    await refreshFriendStats();
     if (!ok && !useAuthStore.getState().user) {
       setLoadError(true);
     }
@@ -150,6 +156,36 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
+        <View style={styles.statsRow}>
+          <View style={[styles.statCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+            <Text style={[styles.statNumber, { color: colors.primary, fontSize: fonts.xl }]}>
+              {friendStats.friendCount}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary, fontSize: fonts.xs }]}>
+              {t.profile.friendsCount}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.statCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
+            onPress={() => router.push('/(tabs)/friends')}
+          >
+            <Text style={[styles.statNumber, { color: colors.warning, fontSize: fonts.xl }]}>
+              {friendStats.pendingReceivedCount}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary, fontSize: fonts.xs }]}>
+              {t.profile.pendingRequests}
+            </Text>
+          </TouchableOpacity>
+          <View style={[styles.statCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+            <Text style={[styles.statNumber, { color: colors.text, fontSize: fonts.xl }]}>
+              {friendStats.pendingSentCount}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.textSecondary, fontSize: fonts.xs }]}>
+              {t.profile.sentRequests}
+            </Text>
+          </View>
+        </View>
+
         <ProfileSection title={t.profile.personalInfo} colors={colors} fonts={fonts}>
           <ProfileField icon="person-outline" label={t.auth.firstName} value={user.firstName} colors={colors} fonts={fonts} />
           <ProfileField icon="person-outline" label={t.auth.lastName} value={user.lastName} colors={colors} fonts={fonts} />
@@ -228,6 +264,16 @@ const styles = StyleSheet.create({
   statusMsg: { marginTop: Spacing.sm, fontStyle: 'italic', textAlign: 'center' },
   statusLine: { marginTop: Spacing.xs },
   actionRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
+  statsRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
+  statCard: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+  },
+  statNumber: { fontWeight: '700' },
+  statLabel: { marginTop: 4, textAlign: 'center' },
   actionButton: {
     flex: 1,
     flexDirection: 'row',

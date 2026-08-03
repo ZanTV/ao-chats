@@ -2,6 +2,7 @@ import { prisma } from '../../config/database';
 import { cacheDel, CacheKeys } from '../../config/redis';
 import { AppError } from '../../middleware/errorHandler';
 import { friendService } from '../friends/friend.service';
+import { messageService } from '../messages/message.service';
 import { getAoManagerId } from '../../services/ao-manager.service';
 import { formatMessagePreview, sortConversations } from '../../utils/conversation.utils';
 
@@ -28,7 +29,10 @@ export class ConversationService {
 
     if (!otherUser.isSystemAccount) {
       const areFriends = await friendService.areFriends(userId, otherUserId);
-      if (!areFriends) throw new AppError(403, 'You can only chat with friends');
+      const hasPending = await friendService.hasPendingConnection(userId, otherUserId);
+      if (!areFriends && !hasPending) {
+        throw new AppError(403, 'Send a friend request or accept a pending request to start chatting');
+      }
     }
 
     const existing = await prisma.conversation.findFirst({
@@ -198,17 +202,10 @@ export class ConversationService {
       data: { lastReadAt: new Date() },
     });
 
-    await prisma.message.updateMany({
-      where: {
-        conversationId,
-        senderId: { not: userId },
-        readAt: null,
-      },
-      data: { readAt: new Date() },
-    });
+    const { readAt, count } = await messageService.markMessagesRead(conversationId, userId);
 
     await cacheDel(CacheKeys.userConversations(userId));
-    return { message: 'Marked as read' };
+    return { message: 'Marked as read', readAt, count };
   }
 }
 

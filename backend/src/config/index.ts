@@ -42,7 +42,7 @@ export const config = {
     (isProduction ? 'https://www.aochats.chat' : '*'),
   rateLimit: {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
-    max: parseInt(process.env.RATE_LIMIT_MAX || (isProduction ? '200' : '100'), 10),
+    max: parseInt(process.env.RATE_LIMIT_MAX || (isProduction ? '1000' : '500'), 10),
   },
   maxPinnedMessages: 20,
   verifyCodeExpiryMs: parseInt(process.env.VERIFY_CODE_EXPIRY_MINUTES || '5', 10) * 60 * 1000,

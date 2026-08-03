@@ -28,6 +28,13 @@ enum MessageType {
   SYSTEM
 }
 
+enum MessageStatus {
+  SENT
+  WAITING
+  DELIVERED
+  READ
+}
+
 enum NotificationType {
   FRIEND_REQUEST
   FRIEND_ACCEPTED
@@ -71,6 +78,7 @@ model User {
   sentMessages          Message[]        @relation("Sender")
   messageReactions      MessageReaction[]
   messagePins           MessagePin[]
+  starredMessages       StarredMessage[]
   notifications         Notification[]   @relation("Recipient")
   sentNotifications     Notification[]   @relation("Actor")
 
@@ -174,10 +182,14 @@ model Message {
   isDeleted      Boolean     @default(false) @map("is_deleted")
   deletedForAll  Boolean     @default(false) @map("deleted_for_all")
   deletedFor     String[]    @default([]) @map("deleted_for")
-  deliveredAt    DateTime?   @map("delivered_at")
-  readAt         DateTime?   @map("read_at")
-  createdAt      DateTime    @default(now()) @map("created_at")
-  updatedAt      DateTime    @updatedAt @map("updated_at")
+  deliveredAt    DateTime?     @map("delivered_at")
+  readAt         DateTime?     @map("read_at")
+  status         MessageStatus @default(SENT)
+  waitingAt      DateTime?     @map("waiting_at")
+  isForwarded    Boolean       @default(false) @map("is_forwarded")
+  forwardedFromId String?      @map("forwarded_from_id")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
 
   conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User              @relation("Sender", fields: [senderId], references: [id], onDelete: Cascade)
@@ -185,6 +197,7 @@ model Message {
   replies      Message[]         @relation("Replies")
   reactions    MessageReaction[]
   pins         MessagePin[]
+  stars        StarredMessage[]
 
   @@index([conversationId, createdAt])
   @@index([senderId])
@@ -218,6 +231,21 @@ model MessagePin {
   @@unique([messageId, conversationId])
   @@index([conversationId])
   @@map("message_pins")
+}
+
+model StarredMessage {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  messageId      String   @map("message_id")
+  conversationId String   @map("conversation_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  @@index([userId])
+  @@map("starred_messages")
 }
 
 model Notification {

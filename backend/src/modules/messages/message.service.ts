@@ -3,6 +3,15 @@ import { cacheGet, cacheSet, cacheDel, cacheInvalidatePattern, CacheKeys, CacheT
 import { AppError } from '../../middleware/errorHandler';
 import { config } from '../../config';
 import { sanitizeInput } from '../../middleware/validation';
+import { MessageStatus } from '@prisma/client';
+
+async function getRecipientStatus(conversationId: string, senderId: string) {
+  const other = await prisma.participant.findFirst({
+    where: { conversationId, userId: { not: senderId } },
+    include: { user: { select: { id: true, status: true } } },
+  });
+  return other?.user ?? null;
+}
 
 export class MessageService {
   async sendMessage(
@@ -10,7 +19,8 @@ export class MessageService {
     senderId: string,
     content: string,
     type: 'TEXT' | 'IMAGE' | 'FILE' = 'TEXT',
-    replyToId?: string
+    replyToId?: string,
+    options?: { isForwarded?: boolean; forwardedFromId?: string }
   ) {
     const participant = await prisma.participant.findUnique({
       where: { conversationId_userId: { conversationId, userId: senderId } },
@@ -24,6 +34,10 @@ export class MessageService {
       if (!replyMsg) throw new AppError(400, 'Reply message not found');
     }
 
+    const recipient = await getRecipientStatus(conversationId, senderId);
+    const initialStatus: MessageStatus =
+      recipient && recipient.status !== 'ONLINE' ? 'WAITING' : 'SENT';
+
     const message = await prisma.$transaction(async (tx) => {
       const msg = await tx.message.create({
         data: {
@@ -32,6 +46,10 @@ export class MessageService {
           content: sanitizeInput(content),
           type,
           replyToId,
+          status: initialStatus,
+          waitingAt: initialStatus === 'WAITING' ? new Date() : null,
+          isForwarded: options?.isForwarded ?? false,
+          forwardedFromId: options?.forwardedFromId,
         },
         include: {
           sender: {
@@ -99,6 +117,7 @@ export class MessageService {
           include: { user: { select: { id: true, firstName: true } } },
         },
         pins: true,
+        stars: { where: { userId }, select: { id: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -151,6 +170,7 @@ export class MessageService {
 
     if (existing) {
       await prisma.messageReaction.delete({ where: { id: existing.id } });
+      await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
       return { action: 'removed', emoji };
     }
 
@@ -164,6 +184,7 @@ export class MessageService {
       data: { updatedAt: new Date() },
     });
 
+    await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
     return { action: 'added', reaction };
   }
 
@@ -212,8 +233,72 @@ export class MessageService {
       targetConversationId,
       userId,
       original.content,
-      original.type as 'TEXT'
+      original.type as 'TEXT',
+      undefined,
+      { isForwarded: true, forwardedFromId: messageId }
     );
+  }
+
+  async starMessage(messageId: string, userId: string) {
+    const message = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!message) throw new AppError(404, 'Message not found');
+
+    const participant = await prisma.participant.findUnique({
+      where: {
+        conversationId_userId: { conversationId: message.conversationId, userId },
+      },
+    });
+    if (!participant) throw new AppError(403, 'Not a participant');
+
+    const star = await prisma.starredMessage.upsert({
+      where: { userId_messageId: { userId, messageId } },
+      create: { userId, messageId, conversationId: message.conversationId },
+      update: {},
+      include: {
+        message: {
+          include: { sender: { select: { id: true, firstName: true, avatarId: true } } },
+        },
+      },
+    });
+
+    await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
+    return star;
+  }
+
+  async unstarMessage(messageId: string, userId: string) {
+    const message = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!message) throw new AppError(404, 'Message not found');
+
+    await prisma.starredMessage.deleteMany({ where: { userId, messageId } });
+    await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
+    return { message: 'Unstarred' };
+  }
+
+  async getStarredMessages(userId: string) {
+    return prisma.starredMessage.findMany({
+      where: { userId },
+      include: {
+        message: {
+          include: {
+            sender: { select: { id: true, firstName: true, lastName: true, avatarId: true } },
+            conversation: { select: { id: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async promoteWaitingToSent(conversationId: string, recipientId: string) {
+    const updated = await prisma.message.updateMany({
+      where: {
+        conversationId,
+        senderId: { not: recipientId },
+        status: 'WAITING',
+      },
+      data: { status: 'SENT', waitingAt: null },
+    });
+    return updated.count;
   }
 
   async pinMessage(messageId: string, userId: string, conversationId: string) {
@@ -280,10 +365,27 @@ export class MessageService {
   }
 
   async markDelivered(messageId: string) {
+    const now = new Date();
     await prisma.message.update({
       where: { id: messageId },
-      data: { deliveredAt: new Date() },
+      data: { deliveredAt: now, status: 'DELIVERED', waitingAt: null },
     });
+    return now;
+  }
+
+  async markMessagesRead(conversationId: string, readerId: string) {
+    const now = new Date();
+    const result = await prisma.message.updateMany({
+      where: {
+        conversationId,
+        senderId: { not: readerId },
+        readAt: null,
+        deletedForAll: false,
+      },
+      data: { readAt: now, status: 'READ' },
+    });
+    await cacheInvalidatePattern(`${CacheKeys.messages(conversationId)}:*`);
+    return { readAt: now, count: result.count };
   }
 }
 

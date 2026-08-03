@@ -94,6 +94,22 @@ class SocketService {
     this.emit('message:read', { conversationId });
   }
 
+  markDelivered(messageId: string, conversationId: string): void {
+    this.emit('message:delivered', { messageId, conversationId });
+  }
+
+  unpinMessage(messageId: string, conversationId: string): void {
+    this.emit('message:unpin', { messageId, conversationId });
+  }
+
+  starMessage(messageId: string, conversationId: string): void {
+    this.emit('message:star', { messageId, conversationId });
+  }
+
+  unstarMessage(messageId: string, conversationId: string): void {
+    this.emit('message:unstar', { messageId, conversationId });
+  }
+
   react(messageId: string, emoji: string, conversationId: string): void {
     this.emit('message:react', { messageId, emoji, conversationId });
   }

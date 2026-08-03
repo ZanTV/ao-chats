@@ -33,7 +33,7 @@ router.get(
   validateQuery(searchUsersSchema),
   asyncHandler(async (req: AuthRequest, res) => {
     const { q, limit } = req.query as { q: string; limit?: string };
-    const users = await userService.searchUsers(q, req.userId!, limit ? parseInt(limit) : 20);
+    const users = await userService.searchUsersWithRelationship(q, req.userId!, limit ? parseInt(limit) : 20);
     res.json({ users });
   })
 );

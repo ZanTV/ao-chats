@@ -17,6 +17,7 @@ import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
 import { cacheData, getCachedData } from '../../src/services/storage';
+import { NotificationBell } from '../../src/components/NotificationPanel';
 import {
   formatConversationTime,
   getLastMessagePreview,
@@ -211,6 +212,7 @@ export default function HomeScreen() {
         <Text style={[styles.title, { color: colors.text, fontSize: fonts.title }]}>
           {t.home.title}
         </Text>
+        <NotificationBell />
       </View>
 
       <View style={[styles.searchBar, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
@@ -271,7 +273,14 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, paddingBottom: Spacing.sm },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.sm,
+  },
   title: { fontWeight: '700' },
   searchBar: {
     flexDirection: 'row',

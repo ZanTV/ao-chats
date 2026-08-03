@@ -9,6 +9,7 @@ import {
 import { AppError } from '../../middleware/errorHandler';
 import { ALL_AVATARS } from '../../config';
 import { normalizeMobileNumber } from './user.validation';
+import { friendService } from '../friends/friend.service';
 
 /** Full profile — owner only (includes private fields) */
 const ownerProfileSelect = {
@@ -163,6 +164,11 @@ export class UserService {
     });
 
     return users;
+  }
+
+  async searchUsersWithRelationship(query: string, currentUserId: string, limit = 20) {
+    const users = await this.searchUsers(query, currentUserId, limit);
+    return friendService.enrichUsersWithRelationship(currentUserId, users);
   }
 
   async getBlockedUserIds(userId: string): Promise<string[]> {

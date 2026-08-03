@@ -10,6 +10,7 @@ export class ApiError extends Error {
 
 export function formatApiError(err: {
   error?: string;
+  message?: string;
   code?: string;
   details?: Record<string, string[] | undefined>;
 }): string {
@@ -18,7 +19,12 @@ export function formatApiError(err: {
       .flatMap(([field, msgs]) => (msgs || []).map((m) => `${field}: ${m}`));
     if (messages.length > 0) return messages.join('\n');
   }
-  return err.error || 'Something went wrong';
+  const msg = err.error || err.message;
+  if (msg) return msg;
+  if (err.code === 'INTERNAL_ERROR') {
+    return 'Server error. The API may need to be redeployed — try again later.';
+  }
+  return 'Something went wrong';
 }
 
 export function validatePassword(password: string): string | null {

@@ -9,6 +9,14 @@ const router = Router();
 router.use(authenticate);
 
 router.get(
+  '/summary',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const summary = await notificationService.getSummary(req.userId!);
+    res.json(summary);
+  })
+);
+
+router.get(
   '/',
   asyncHandler(async (req: AuthRequest, res) => {
     const notifications = await notificationService.getNotifications(req.userId!);
@@ -36,6 +44,14 @@ router.post(
   '/read-all',
   asyncHandler(async (req: AuthRequest, res) => {
     const result = await notificationService.markAllAsRead(req.userId!);
+    res.json(result);
+  })
+);
+
+router.delete(
+  '/:id',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const result = await notificationService.deleteNotification(paramId(req.params.id), req.userId!);
     res.json(result);
   })
 );

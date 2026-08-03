@@ -1,6 +1,8 @@
 import { prisma } from '../../config/database';
 import { cacheDel, CacheKeys } from '../../config/redis';
 import { AppError } from '../../middleware/errorHandler';
+import { notificationService } from '../notifications/notification.service';
+import { getIO } from '../../sockets';
 
 async function assertNotSystemAccount(userId: string) {
   const user = await prisma.user.findUnique({
@@ -47,6 +49,27 @@ export class FriendService {
 
     await cacheDel(CacheKeys.userFriends(senderId), CacheKeys.userFriends(receiverId));
 
+    const senderName = `${request.sender.firstName} ${request.sender.lastName}`.trim();
+    try {
+      await notificationService.notifyFriendRequest(
+        receiverId,
+        senderName,
+        senderId,
+        request.id
+      );
+      const io = getIO();
+      io?.to(`user:${receiverId}`).emit('friend:request', {
+        request,
+        unreadCount: await notificationService.getUnreadCount(receiverId),
+      });
+      io?.to(`user:${receiverId}`).emit('notification:new', {
+        type: 'FRIEND_REQUEST',
+        requestId: request.id,
+      });
+    } catch {
+      // notifications optional
+    }
+
     return request;
   }
 
@@ -85,6 +108,27 @@ export class FriendService {
       CacheKeys.userFriends(request.senderId),
       CacheKeys.userFriends(request.receiverId)
     );
+
+    try {
+      const receiverName = `${request.receiver.firstName} ${request.receiver.lastName}`.trim();
+      await notificationService.notifyFriendAccepted(
+        request.senderId,
+        receiverName,
+        request.receiverId,
+        requestId
+      );
+      const io = getIO();
+      io?.to(`user:${request.senderId}`).emit('friend:accepted', {
+        friend: request.receiver,
+        requestId,
+      });
+      io?.to(`user:${request.senderId}`).emit('notification:new', {
+        type: 'FRIEND_ACCEPTED',
+        requestId,
+      });
+    } catch {
+      // notifications optional
+    }
 
     return { message: 'Friend request accepted', friend: request.sender };
   }
@@ -222,6 +266,80 @@ export class FriendService {
       },
     });
     return !!friendship;
+  }
+
+  async hasPendingConnection(userId1: string, userId2: string): Promise<boolean> {
+    const pending = await prisma.friendRequest.findFirst({
+      where: {
+        status: 'PENDING',
+        OR: [
+          { senderId: userId1, receiverId: userId2 },
+          { senderId: userId2, receiverId: userId1 },
+        ],
+      },
+    });
+    return !!pending;
+  }
+
+  async getStats(userId: string) {
+    const [friendCount, pendingReceivedCount, pendingSentCount] = await Promise.all([
+      prisma.friendship.count({
+        where: { OR: [{ user1Id: userId }, { user2Id: userId }] },
+      }),
+      prisma.friendRequest.count({
+        where: { receiverId: userId, status: 'PENDING' },
+      }),
+      prisma.friendRequest.count({
+        where: { senderId: userId, status: 'PENDING' },
+      }),
+    ]);
+    return { friendCount, pendingReceivedCount, pendingSentCount };
+  }
+
+  async enrichUsersWithRelationship<T extends { id: string }>(
+    currentUserId: string,
+    users: T[]
+  ): Promise<Array<T & { relationship: 'none' | 'friend' | 'pending_sent' | 'pending_received' }>> {
+    if (users.length === 0) return [];
+
+    const ids = users.map((u) => u.id);
+    const [friendships, pendingRequests] = await Promise.all([
+      prisma.friendship.findMany({
+        where: {
+          OR: [
+            { user1Id: currentUserId, user2Id: { in: ids } },
+            { user2Id: currentUserId, user1Id: { in: ids } },
+          ],
+        },
+      }),
+      prisma.friendRequest.findMany({
+        where: {
+          status: 'PENDING',
+          OR: [
+            { senderId: currentUserId, receiverId: { in: ids } },
+            { senderId: { in: ids }, receiverId: currentUserId },
+          ],
+        },
+      }),
+    ]);
+
+    const friendIds = new Set(
+      friendships.map((f) => (f.user1Id === currentUserId ? f.user2Id : f.user1Id))
+    );
+    const sentIds = new Set(
+      pendingRequests.filter((r) => r.senderId === currentUserId).map((r) => r.receiverId)
+    );
+    const receivedIds = new Set(
+      pendingRequests.filter((r) => r.receiverId === currentUserId).map((r) => r.senderId)
+    );
+
+    return users.map((user) => {
+      let relationship: 'none' | 'friend' | 'pending_sent' | 'pending_received' = 'none';
+      if (friendIds.has(user.id)) relationship = 'friend';
+      else if (sentIds.has(user.id)) relationship = 'pending_sent';
+      else if (receivedIds.has(user.id)) relationship = 'pending_received';
+      return { ...user, relationship };
+    });
   }
 }
 

@@ -56,6 +56,14 @@ export class NotificationService {
     return { message: 'All marked as read' };
   }
 
+  async getSummary(userId: string, limit = 50) {
+    const [notifications, unreadCount] = await Promise.all([
+      this.getNotifications(userId, limit),
+      this.getUnreadCount(userId),
+    ]);
+    return { notifications, unreadCount };
+  }
+
   async notifyFriendRequest(receiverId: string, senderName: string, senderId: string, requestId: string) {
     return this.create(
       receiverId,
@@ -65,6 +73,30 @@ export class NotificationService {
       senderId,
       { requestId }
     );
+  }
+
+  async notifyFriendAccepted(
+    senderId: string,
+    accepterName: string,
+    accepterId: string,
+    requestId: string
+  ) {
+    return this.create(
+      senderId,
+      'FRIEND_ACCEPTED',
+      'Friend Request Accepted',
+      `${accepterName} accepted your friend request`,
+      accepterId,
+      { requestId }
+    );
+  }
+
+  async deleteNotification(notificationId: string, userId: string) {
+    await prisma.notification.deleteMany({
+      where: { id: notificationId, userId },
+    });
+    await cacheDel(CacheKeys.notifications(userId));
+    return { message: 'Notification deleted' };
   }
 
   async notifyNewMessage(
