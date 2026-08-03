@@ -12,12 +12,17 @@ if ($LASTEXITCODE -ne 0) {
   exit 1
 }
 
-$RepoName = "ao-chats-v2"
-$User = (gh api user -q .login)
+$RepoName = "ao-chats"
+$User = "ZanTV"
 $Remote = "https://github.com/$User/$RepoName.git"
 
-Write-Host "Creating GitHub repo: $User/$RepoName"
-gh repo create $RepoName --private --source=. --remote=origin --push --description "AO Chats v2 - Full stack chat application"
+Write-Host "Using GitHub repo: $User/$RepoName"
+if (-not (git remote get-url origin 2>$null)) {
+  git remote add origin $Remote
+}
+
+Write-Host "Pushing to GitHub..."
+git push -u origin main
 
 Write-Host "Connecting Vercel to GitHub..."
 vercel link --project mobile --yes
