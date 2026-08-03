@@ -8,7 +8,6 @@ import {
   Platform,
   TouchableOpacity,
   Alert,
-  FlatList,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +19,8 @@ import { Avatar } from '../../src/components/Avatar';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
+import { loadAvatarCategories, loadUniversities } from '../../src/services/signupOptions';
+import { getLocalPasswordStrength } from '../../src/constants/signup';
 import { validatePassword, validateUsername } from '../../src/utils/validation';
 import { Spacing, BorderRadius } from '../../src/theme';
 
@@ -58,17 +59,31 @@ export default function RegisterScreen() {
   const [avatarCategories, setAvatarCategories] = useState<Record<string, string[]>>({});
   const [selectedCategory, setSelectedCategory] = useState('animals');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState('');
+  const [optionsLoading, setOptionsLoading] = useState(true);
 
   useEffect(() => {
-    api.getUniversities().then((r) => setUniversities(r.universities)).catch(() => {});
-    api.getAvatars().then((r) => setAvatarCategories(r.categories)).catch(() => {});
+    let active = true;
+    setOptionsLoading(true);
+    Promise.all([loadUniversities(), loadAvatarCategories()])
+      .then(([uniList, avatarMap]) => {
+        if (!active) return;
+        setUniversities(uniList);
+        setAvatarCategories(avatarMap);
+      })
+      .finally(() => {
+        if (active) setOptionsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
     if (password.length >= 4) {
       api.checkPasswordStrength(password)
         .then(setPasswordStrength)
-        .catch(() => {});
+        .catch(() => setPasswordStrength(getLocalPasswordStrength(password)));
     }
   }, [password]);
 
@@ -136,6 +151,7 @@ export default function RegisterScreen() {
 
   const handleNext = async () => {
     if (!validateStep()) return;
+    setFormError('');
 
     if (step === 4) {
       setLoading(true);
@@ -153,7 +169,11 @@ export default function RegisterScreen() {
         startCodeTimer(5);
         setStep(5);
       } catch (err) {
-        Alert.alert('Registration Error', err instanceof Error ? err.message : t.common.error);
+        const message = err instanceof Error ? err.message : t.common.error;
+        setFormError(message);
+        if (Platform.OS !== 'web') {
+          Alert.alert('Registration Error', message);
+        }
       } finally {
         setLoading(false);
       }
@@ -162,7 +182,9 @@ export default function RegisterScreen() {
 
     if (step === 5) {
       if (secondsLeft === 0 && codeExpiresAt) {
-        Alert.alert('Code Expired', t.auth.codeExpired);
+        const message = t.auth.codeExpired;
+        setFormError(message);
+        if (Platform.OS !== 'web') Alert.alert('Code Expired', message);
         return;
       }
       setLoading(true);
@@ -170,7 +192,11 @@ export default function RegisterScreen() {
         await verifyEmail(email.trim().toLowerCase(), verifyCode.trim());
         router.replace('/(tabs)');
       } catch (err) {
-        Alert.alert('Verification Failed', err instanceof Error ? err.message : t.common.error);
+        const message = err instanceof Error ? err.message : t.common.error;
+        setFormError(message);
+        if (Platform.OS !== 'web') {
+          Alert.alert('Verification Failed', message);
+        }
       } finally {
         setLoading(false);
       }
@@ -236,20 +262,43 @@ export default function RegisterScreen() {
             <Text style={[styles.stepTitle, { color: colors.text, fontSize: fonts.lg }]}>
               {t.auth.university}
             </Text>
-            <ScrollView style={styles.universityList} nestedScrollEnabled>
-              {universities.map((uni) => (
-                <TouchableOpacity
-                  key={uni}
-                  style={[styles.universityItem, { backgroundColor: university === uni ? colors.primary + '15' : colors.surfaceSecondary, borderColor: university === uni ? colors.primary : colors.border }]}
-                  onPress={() => setUniversity(uni)}
-                >
-                  <Text style={{ color: university === uni ? colors.primary : colors.text, fontWeight: university === uni ? '600' : '400' }}>
-                    {uni}
-                  </Text>
-                  {university === uni && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            <Text style={[styles.stepSubtitle, { color: colors.textSecondary }]}>
+              Select your university to connect with your campus community
+            </Text>
+            {optionsLoading ? (
+              <Text style={{ color: colors.textSecondary, marginBottom: Spacing.md }}>
+                {t.common.loading}
+              </Text>
+            ) : (
+              <View style={styles.universityList}>
+                {universities.map((uni) => (
+                  <TouchableOpacity
+                    key={uni}
+                    style={[
+                      styles.universityItem,
+                      {
+                        backgroundColor: university === uni ? colors.primary + '15' : colors.surfaceSecondary,
+                        borderColor: university === uni ? colors.primary : colors.border,
+                      },
+                    ]}
+                    onPress={() => setUniversity(uni)}
+                  >
+                    <Text
+                      style={{
+                        color: university === uni ? colors.primary : colors.text,
+                        fontWeight: university === uni ? '600' : '400',
+                        flex: 1,
+                      }}
+                    >
+                      {uni}
+                    </Text>
+                    {university === uni && (
+                      <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
             {errors.university && (
               <Text style={{ color: colors.danger, fontSize: fonts.sm, marginBottom: Spacing.sm }}>
                 {errors.university}
@@ -264,27 +313,35 @@ export default function RegisterScreen() {
             <Text style={[styles.stepTitle, { color: colors.text, fontSize: fonts.lg }]}>
               {t.auth.chooseAvatar}
             </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-              {AVATAR_CATEGORIES.map((cat) => (
-                <TouchableOpacity
-                  key={cat.key}
-                  style={[styles.categoryChip, { backgroundColor: selectedCategory === cat.key ? colors.primary : colors.surfaceSecondary }]}
-                  onPress={() => setSelectedCategory(cat.key)}
-                >
-                  <Text style={{ fontSize: 16 }}>{cat.icon}</Text>
-                  <Text style={{ color: selectedCategory === cat.key ? '#FFF' : colors.text, fontSize: 12, fontWeight: '500' }}>
-                    {cat.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <View style={styles.avatarGrid}>
-              {(avatarCategories[selectedCategory] || []).map((id) => (
-                <TouchableOpacity key={id} onPress={() => setAvatarId(id)} style={[styles.avatarItem, avatarId === id && { borderColor: colors.primary, borderWidth: 3 }]}>
-                  <Avatar avatarId={id} size={64} />
-                </TouchableOpacity>
-              ))}
-            </View>
+            {optionsLoading ? (
+              <Text style={{ color: colors.textSecondary, marginBottom: Spacing.md }}>
+                {t.common.loading}
+              </Text>
+            ) : (
+              <>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+                  {AVATAR_CATEGORIES.map((cat) => (
+                    <TouchableOpacity
+                      key={cat.key}
+                      style={[styles.categoryChip, { backgroundColor: selectedCategory === cat.key ? colors.primary : colors.surfaceSecondary }]}
+                      onPress={() => setSelectedCategory(cat.key)}
+                    >
+                      <Text style={{ fontSize: 16 }}>{cat.icon}</Text>
+                      <Text style={{ color: selectedCategory === cat.key ? '#FFF' : colors.text, fontSize: 12, fontWeight: '500' }}>
+                        {cat.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <View style={styles.avatarGrid}>
+                  {(avatarCategories[selectedCategory] || []).map((id) => (
+                    <TouchableOpacity key={id} onPress={() => setAvatarId(id)} style={[styles.avatarItem, avatarId === id && { borderColor: colors.primary, borderWidth: 3 }]}>
+                      <Avatar avatarId={id} size={64} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
           </>
         );
       case 5:
@@ -357,6 +414,11 @@ export default function RegisterScreen() {
         </ScrollView>
 
         <View style={styles.bottomBar}>
+          {formError ? (
+            <View style={[styles.errorBox, { backgroundColor: colors.danger + '15' }]}>
+              <Text style={[styles.errorText, { color: colors.danger }]}>{formError}</Text>
+            </View>
+          ) : null}
           <Button
             title={step === 5 ? t.auth.finish : step === 4 ? t.auth.next : t.auth.next}
             onPress={handleNext}
@@ -382,8 +444,10 @@ const styles = StyleSheet.create({
   strengthTrack: { height: 4, borderRadius: 2, overflow: 'hidden' },
   strengthFill: { height: '100%', borderRadius: 2 },
   strengthLabel: { fontSize: 12, marginTop: 4, fontWeight: '500' },
-  universityList: { maxHeight: 240, marginBottom: Spacing.md },
+  universityList: { marginBottom: Spacing.md },
   universityItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: Spacing.md, borderRadius: BorderRadius.md, borderWidth: 1, marginBottom: Spacing.sm },
+  errorBox: { padding: Spacing.md, borderRadius: BorderRadius.md, marginBottom: Spacing.md },
+  errorText: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
   categoryScroll: { marginBottom: Spacing.lg },
   categoryChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full, marginRight: Spacing.sm },
   avatarGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md, justifyContent: 'center' },

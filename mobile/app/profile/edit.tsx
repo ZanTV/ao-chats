@@ -18,6 +18,7 @@ import { Avatar } from '../../src/components/Avatar';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
+import { loadAvatarCategories, loadUniversities } from '../../src/services/signupOptions';
 import { validateUsername, validateMobileNumber } from '../../src/utils/validation';
 import { Spacing, BorderRadius } from '../../src/theme';
 
@@ -62,8 +63,8 @@ export default function EditProfileScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    api.getAvatars().then((r) => setAvatarCategories(r.categories)).catch(() => {});
-    api.getUniversities().then((r) => setUniversities(r.universities)).catch(() => {});
+    loadAvatarCategories().then(setAvatarCategories);
+    loadUniversities().then(setUniversities);
   }, []);
 
   const hasChanges =
