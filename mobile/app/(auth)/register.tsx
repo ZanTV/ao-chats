@@ -16,6 +16,7 @@ import { Input } from '../../src/components/Input';
 import { Button } from '../../src/components/Button';
 import { ProgressBar } from '../../src/components/ProgressBar';
 import { Avatar } from '../../src/components/Avatar';
+import { UniversityPicker } from '../../src/components/UniversityPicker';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
@@ -270,39 +271,14 @@ export default function RegisterScreen() {
                 {t.common.loading}
               </Text>
             ) : (
-              <View style={styles.universityList}>
-                {universities.map((uni) => (
-                  <TouchableOpacity
-                    key={uni}
-                    style={[
-                      styles.universityItem,
-                      {
-                        backgroundColor: university === uni ? colors.primary + '15' : colors.surfaceSecondary,
-                        borderColor: university === uni ? colors.primary : colors.border,
-                      },
-                    ]}
-                    onPress={() => setUniversity(uni)}
-                  >
-                    <Text
-                      style={{
-                        color: university === uni ? colors.primary : colors.text,
-                        fontWeight: university === uni ? '600' : '400',
-                        flex: 1,
-                      }}
-                    >
-                      {uni}
-                    </Text>
-                    {university === uni && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-            {errors.university && (
-              <Text style={{ color: colors.danger, fontSize: fonts.sm, marginBottom: Spacing.sm }}>
-                {errors.university}
-              </Text>
+              <UniversityPicker
+                label={t.auth.university}
+                value={university}
+                onChange={setUniversity}
+                universities={universities}
+                error={errors.university}
+                placeholder="Tap to choose your university"
+              />
             )}
             <Input label={t.auth.course} value={course} onChangeText={setCourse} icon="book-outline" />
           </>
@@ -444,8 +420,6 @@ const styles = StyleSheet.create({
   strengthTrack: { height: 4, borderRadius: 2, overflow: 'hidden' },
   strengthFill: { height: '100%', borderRadius: 2 },
   strengthLabel: { fontSize: 12, marginTop: 4, fontWeight: '500' },
-  universityList: { marginBottom: Spacing.md },
-  universityItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: Spacing.md, borderRadius: BorderRadius.md, borderWidth: 1, marginBottom: Spacing.sm },
   errorBox: { padding: Spacing.md, borderRadius: BorderRadius.md, marginBottom: Spacing.md },
   errorText: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
   categoryScroll: { marginBottom: Spacing.lg },

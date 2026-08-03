@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Input } from '../../src/components/Input';
 import { Button } from '../../src/components/Button';
 import { Avatar } from '../../src/components/Avatar';
+import { UniversityPicker } from '../../src/components/UniversityPicker';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
@@ -193,22 +194,13 @@ export default function EditProfileScreen() {
           <Text style={[styles.sectionLabel, { color: colors.textSecondary, fontSize: fonts.sm }]}>
             {t.profile.education}
           </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.uniScroll}>
-            {universities.map((uni) => (
-              <TouchableOpacity
-                key={uni}
-                style={[styles.uniChip, {
-                  backgroundColor: university === uni ? colors.primary + '15' : colors.surfaceSecondary,
-                  borderColor: university === uni ? colors.primary : colors.border,
-                }]}
-                onPress={() => setUniversity(uni)}
-              >
-                <Text style={{ color: university === uni ? colors.primary : colors.text, fontSize: fonts.xs }}>
-                  {uni}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          <UniversityPicker
+            label={t.auth.university}
+            value={university}
+            onChange={setUniversity}
+            universities={universities}
+            placeholder="Tap to choose your university"
+          />
           <Input label={t.auth.course} value={course} onChangeText={setCourse} icon="book-outline" />
 
           <Text style={[styles.sectionLabel, { color: colors.textSecondary, fontSize: fonts.sm }]}>
@@ -277,14 +269,6 @@ const styles = StyleSheet.create({
   },
   avatarItem: { borderRadius: 30, padding: 2, borderWidth: 3, borderColor: 'transparent' },
   sectionLabel: { fontWeight: '600', marginBottom: Spacing.sm, marginTop: Spacing.sm },
-  uniScroll: { marginBottom: Spacing.md, maxHeight: 44 },
-  uniChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    borderWidth: 1,
-    marginRight: Spacing.sm,
-  },
   privateNote: {
     flexDirection: 'row',
     alignItems: 'center',

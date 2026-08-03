@@ -1,17 +1,44 @@
 /** Built-in signup options — used when API is unavailable (e.g. production backend mismatch). */
-export const UNIVERSITIES = [
-  'University of Nairobi',
-  'Kenyatta University',
-  'Strathmore University',
-  'United States International University',
-  'Jomo Kenyatta University of Agriculture and Technology',
-  'Moi University',
-  'Egerton University',
-  'Maseno University',
-  'Technical University of Kenya',
-  'Dedan Kimathi University of Technology',
-  'Other',
-] as const;
+export interface UniversityOption {
+  name: string;
+  abbreviations: string[];
+}
+
+export const UNIVERSITY_OPTIONS: UniversityOption[] = [
+  { name: 'University of Nairobi', abbreviations: ['UoN', 'UON'] },
+  { name: 'Kenyatta University', abbreviations: ['KU'] },
+  { name: 'Strathmore University', abbreviations: ['SU', 'Strathmore'] },
+  { name: 'United States International University', abbreviations: ['USIU', 'USIU-Africa'] },
+  { name: 'Jomo Kenyatta University of Agriculture and Technology', abbreviations: ['JKUAT'] },
+  { name: 'Moi University', abbreviations: ['MU', 'Moi'] },
+  { name: 'Egerton University', abbreviations: ['EU', 'Egerton'] },
+  { name: 'Maseno University', abbreviations: ['MSU', 'Maseno'] },
+  { name: 'Technical University of Kenya', abbreviations: ['TUK'] },
+  { name: 'Dedan Kimathi University of Technology', abbreviations: ['DeKUT', 'DKUT'] },
+  { name: 'Other', abbreviations: ['Other'] },
+];
+
+export const UNIVERSITIES = UNIVERSITY_OPTIONS.map((u) => u.name);
+
+const ABBREVIATION_LOOKUP = new Map<string, string[]>(
+  UNIVERSITY_OPTIONS.map((u) => [u.name, u.abbreviations.map((a) => a.toLowerCase())])
+);
+
+/** Match university by full name or abbreviation (e.g. UoN, JKUAT, USIU). */
+export function filterUniversities(query: string, universities: string[]): string[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return universities;
+
+  return universities.filter((name) => {
+    if (name.toLowerCase().includes(q)) return true;
+    const abbrevs = ABBREVIATION_LOOKUP.get(name) || [];
+    return abbrevs.some((a) => a.includes(q) || a.replace(/[^a-z0-9]/g, '') === q.replace(/[^a-z0-9]/g, ''));
+  });
+}
+
+export function getUniversityAbbreviations(name: string): string[] {
+  return UNIVERSITY_OPTIONS.find((u) => u.name === name)?.abbreviations ?? [];
+}
 
 export const AVATAR_CATEGORIES: Record<string, string[]> = {
   animals: ['avatar-1', 'avatar-2', 'avatar-3', 'avatar-4', 'avatar-5'],
