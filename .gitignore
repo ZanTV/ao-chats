@@ -40,3 +40,4 @@ backend/prisma/*.db-journal
 
 # Uploads (local dev)
 backend/uploads/
+.vercel
