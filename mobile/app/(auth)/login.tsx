@@ -27,6 +27,7 @@ export default function LoginScreen() {
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState('');
 
   const handleLogin = async () => {
     const newErrors: Record<string, string> = {};
@@ -39,31 +40,40 @@ export default function LoginScreen() {
 
     setLoading(true);
     setErrors({});
+    setFormError('');
     try {
       await login(email, password, rememberMe);
       router.replace('/(tabs)');
     } catch (err) {
       if (err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED') {
-        Alert.alert(
-          t.auth.verifyEmail,
-          t.auth.verifyLoginPrompt,
-          [
-            { text: t.common.cancel, style: 'cancel' },
-            {
-              text: t.auth.verifyNow,
-              onPress: () =>
-                router.push({
-                  pathname: '/(auth)/verify-email',
-                  params: {
-                    email: email.trim().toLowerCase(),
-                    sendCode: 'true',
-                  },
-                }),
-            },
-          ]
-        );
+        if (Platform.OS === 'web') {
+          setFormError(t.auth.verifyLoginPrompt);
+        } else {
+          Alert.alert(
+            t.auth.verifyEmail,
+            t.auth.verifyLoginPrompt,
+            [
+              { text: t.common.cancel, style: 'cancel' },
+              {
+                text: t.auth.verifyNow,
+                onPress: () =>
+                  router.push({
+                    pathname: '/(auth)/verify-email',
+                    params: {
+                      email: email.trim().toLowerCase(),
+                      sendCode: 'true',
+                    },
+                  }),
+              },
+            ]
+          );
+        }
       } else {
-        Alert.alert('Error', err instanceof Error ? err.message : t.common.error);
+        const message = err instanceof Error ? err.message : t.common.error;
+        setFormError(message);
+        if (Platform.OS !== 'web') {
+          Alert.alert('Error', message);
+        }
       }
     } finally {
       setLoading(false);
@@ -132,6 +142,29 @@ export default function LoginScreen() {
             </View>
 
             <Button title={t.auth.login} onPress={handleLogin} loading={loading} fullWidth />
+
+            {formError ? (
+              <View style={[styles.errorBox, { backgroundColor: colors.danger + '15' }]}>
+                <Text style={[styles.errorText, { color: colors.danger }]}>{formError}</Text>
+                {formError === t.auth.verifyLoginPrompt ? (
+                  <TouchableOpacity
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(auth)/verify-email',
+                        params: {
+                          email: email.trim().toLowerCase(),
+                          sendCode: 'true',
+                        },
+                      })
+                    }
+                  >
+                    <Text style={[styles.verifyLink, { color: colors.primary }]}>
+                      {t.auth.verifyNow}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.footer}>
@@ -181,4 +214,11 @@ const styles = StyleSheet.create({
   footer: { flexDirection: 'row', justifyContent: 'center' },
   footerText: { fontSize: 14 },
   linkText: { fontSize: 14, fontWeight: '600' },
+  errorBox: {
+    marginTop: Spacing.md,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+  },
+  errorText: { fontSize: 14, textAlign: 'center' },
+  verifyLink: { fontSize: 14, fontWeight: '600', textAlign: 'center', marginTop: Spacing.sm },
 });
