@@ -5,7 +5,7 @@
   "outputDirectory": "dist",
   "installCommand": "npm install --legacy-peer-deps",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!_expo/|assets/|favicon.ico).*)", "destination": "/index.html" }
   ],
   "headers": [
     {

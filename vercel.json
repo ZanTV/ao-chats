@@ -6,7 +6,7 @@
   "installCommand": "cd mobile && npm install --legacy-peer-deps",
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!_expo/|assets/|favicon.ico).*)",
       "destination": "/index.html"
     }
   ],
