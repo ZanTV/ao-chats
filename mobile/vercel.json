@@ -1,0 +1,28 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "npx expo export --platform web",
+  "outputDirectory": "dist",
+  "installCommand": "npm install --legacy-peer-deps",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ],
+  "env": {
+    "EXPO_PUBLIC_APP_NAME": "AO Chats",
+    "EXPO_PUBLIC_APP_URL": "https://www.aochats.chat",
+    "EXPO_PUBLIC_API_URL": "https://api.aochats.chat/api",
+    "EXPO_PUBLIC_SOCKET_URL": "https://api.aochats.chat",
+    "EXPO_PUBLIC_ENV": "production"
+  }
+}

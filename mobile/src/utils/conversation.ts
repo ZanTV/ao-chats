@@ -1,0 +1,65 @@
+interface SortableConversation {
+  isPinned?: boolean;
+  updatedAt: string;
+}
+
+export function sortConversations<T extends SortableConversation>(conversations: T[]): T[] {
+  return [...conversations].sort((a, b) => {
+    if (a.isPinned && !b.isPinned) return -1;
+    if (!a.isPinned && b.isPinned) return 1;
+    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  });
+}
+
+export function formatConversationTime(dateStr: string, locale?: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+
+  if (date >= startOfToday) {
+    return date.toLocaleTimeString(locale || undefined, { hour: '2-digit', minute: '2-digit' });
+  }
+  if (date >= startOfYesterday) {
+    return 'Yesterday';
+  }
+
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return date.toLocaleDateString(locale || undefined, {
+    day: 'numeric',
+    month: 'short',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+}
+
+export function getLastMessagePreview(
+  lastMessage: {
+    preview?: string;
+    content: string;
+    senderId: string;
+    type?: string;
+    senderName?: string;
+  } | null,
+  currentUserId: string,
+  fallback: string
+): string {
+  if (!lastMessage) return fallback;
+  if (lastMessage.preview) return lastMessage.preview;
+
+  const prefix =
+    lastMessage.senderId === currentUserId
+      ? 'You'
+      : lastMessage.senderName || 'Someone';
+
+  switch (lastMessage.type) {
+    case 'IMAGE':
+      return `${prefix}: 📷 Photo`;
+    case 'FILE':
+      return `${prefix}: 📄 Document`;
+    case 'SYSTEM':
+      return lastMessage.content;
+    default:
+      return `${prefix}: ${lastMessage.content}`;
+  }
+}

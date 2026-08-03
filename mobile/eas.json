@@ -1,0 +1,34 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_APP_NAME": "AO Chats",
+        "EXPO_PUBLIC_APP_URL": "https://www.aochats.chat",
+        "EXPO_PUBLIC_API_URL": "https://api.aochats.chat/api",
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.aochats.chat",
+        "EXPO_PUBLIC_ENV": "production"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_APP_NAME": "AO Chats",
+        "EXPO_PUBLIC_APP_URL": "https://www.aochats.chat",
+        "EXPO_PUBLIC_API_URL": "https://api.aochats.chat/api",
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.aochats.chat",
+        "EXPO_PUBLIC_ENV": "production"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+enum UserStatus {
+  ONLINE
+  OFFLINE
+  AWAY
+  BUSY
+}
+
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  SYSTEM
+}
+
+enum NotificationType {
+  FRIEND_REQUEST
+  FRIEND_ACCEPTED
+  NEW_MESSAGE
+  MENTION
+}
+
+model User {
+  id                String       @id @default(uuid())
+  email             String       @unique
+  username          String       @unique
+  passwordHash      String       @map("password_hash")
+  firstName         String       @map("first_name")
+  lastName          String       @map("last_name")
+  university        String?
+  course            String?
+  bio               String?
+  mobileNumber      String?      @unique @map("mobile_number")
+  avatarId          String       @default("avatar-1") @map("avatar_id")
+  status            UserStatus   @default(OFFLINE)
+  statusMessage     String?      @map("status_message")
+  emailVerified     Boolean      @default(false) @map("email_verified")
+  emailVerifyCode   String?      @map("email_verify_code")
+  emailVerifyExpiry DateTime?    @map("email_verify_expiry")
+  resetToken        String?      @map("reset_token")
+  resetTokenExpiry  DateTime?    @map("reset_token_expiry")
+  lastSeen          DateTime?    @map("last_seen")
+  isVerified        Boolean      @default(false) @map("is_verified")
+  isSystemAccount   Boolean      @default(false) @map("is_system_account")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  sessions              Session[]
+  sentFriendRequests    FriendRequest[]  @relation("SentRequests")
+  receivedFriendRequests FriendRequest[] @relation("ReceivedRequests")
+  friendshipsAsUser1  Friendship[]     @relation("User1")
+  friendshipsAsUser2  Friendship[]     @relation("User2")
+  blockedUsers          Block[]          @relation("Blocker")
+  blockedBy             Block[]          @relation("Blocked")
+  participants          Participant[]
+  sentMessages          Message[]        @relation("Sender")
+  messageReactions      MessageReaction[]
+  messagePins           MessagePin[]
+  notifications         Notification[]   @relation("Recipient")
+  sentNotifications     Notification[]   @relation("Actor")
+
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  refreshToken String   @unique @map("refresh_token")
+  deviceInfo   String?  @map("device_info")
+  ipAddress    String?  @map("ip_address")
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model FriendRequest {
+  id         String              @id @default(uuid())
+  senderId   String              @map("sender_id")
+  receiverId String              @map("receiver_id")
+  status     FriendRequestStatus @default(PENDING)
+  createdAt  DateTime            @default(now()) @map("created_at")
+  updatedAt  DateTime            @updatedAt @map("updated_at")
+
+  sender   User @relation("SentRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("ReceivedRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([receiverId, status])
+  @@map("friend_requests")
+}
+
+model Friendship {
+  id        String   @id @default(uuid())
+  user1Id   String   @map("user1_id")
+  user2Id   String   @map("user2_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user1 User @relation("User1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2 User @relation("User2", fields: [user2Id], references: [id], onDelete: Cascade)
+
+  @@unique([user1Id, user2Id])
+  @@index([user1Id])
+  @@index([user2Id])
+  @@map("friends")
+}
+
+model Block {
+  id        String   @id @default(uuid())
+  blockerId String   @map("blocker_id")
+  blockedId String   @map("blocked_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@map("blocks")
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  isGroup   Boolean  @default(false) @map("is_group")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  participants Participant[]
+  messages     Message[]
+
+  @@map("conversations")
+}
+
+model Participant {
+  id             String    @id @default(uuid())
+  conversationId String    @map("conversation_id")
+  userId         String    @map("user_id")
+  isPinned       Boolean   @default(false) @map("is_pinned")
+  lastReadAt     DateTime? @map("last_read_at")
+  joinedAt       DateTime  @default(now()) @map("joined_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("participants")
+}
+
+model Message {
+  id             String      @id @default(uuid())
+  conversationId String      @map("conversation_id")
+  senderId       String      @map("sender_id")
+  content        String
+  type           MessageType @default(TEXT)
+  replyToId      String?     @map("reply_to_id")
+  isDeleted      Boolean     @default(false) @map("is_deleted")
+  deletedForAll  Boolean     @default(false) @map("deleted_for_all")
+  deletedFor     String[]    @default([]) @map("deleted_for")
+  deliveredAt    DateTime?   @map("delivered_at")
+  readAt         DateTime?   @map("read_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User              @relation("Sender", fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo      Message?          @relation("Replies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies      Message[]         @relation("Replies")
+  reactions    MessageReaction[]
+  pins         MessagePin[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@map("messages")
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  emoji     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@map("message_reactions")
+}
+
+model MessagePin {
+  id             String   @id @default(uuid())
+  messageId      String   @map("message_id")
+  conversationId String   @map("conversation_id")
+  pinnedById     String   @map("pinned_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  message  Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  pinnedBy User    @relation(fields: [pinnedById], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, conversationId])
+  @@index([conversationId])
+  @@map("message_pins")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  actorId   String?          @map("actor_id")
+  type      NotificationType
+  title     String
+  body      String
+  data      Json?
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user  User  @relation("Recipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("Actor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}

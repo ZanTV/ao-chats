@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+web-build/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+backend/.env
+mobile/.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Expo
+.expo/
+.expo-shared/
+expo-env.d.ts
+
+# Vercel
+.vercel/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Prisma
+backend/prisma/*.db
+backend/prisma/*.db-journal
+
+# Uploads (local dev)
+backend/uploads/

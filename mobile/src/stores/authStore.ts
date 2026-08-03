@@ -1,0 +1,173 @@
+import { create } from 'zustand';
+import { api } from '../services/api';
+import {
+  saveTokens,
+  clearTokens,
+  getRefreshToken,
+  getAccessToken,
+  cacheUser,
+  getCachedUser,
+} from '../services/storage';
+import { socketService } from '../services/socket';
+import { ApiError } from '../utils/validation';
+
+export interface User {
+  id: string;
+  email: string;
+  emailVerified?: boolean;
+  mobileNumber?: string | null;
+  username: string;
+  firstName: string;
+  lastName: string;
+  avatarId?: string;
+  university?: string;
+  course?: string;
+  bio?: string;
+  status?: string;
+  statusMessage?: string;
+  lastSeen?: string;
+  createdAt?: string;
+  isVerified?: boolean;
+}
+
+interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
+  register: (data: Record<string, unknown>) => Promise<void>;
+  verifyEmail: (email: string, code: string) => Promise<void>;
+  logout: () => Promise<void>;
+  initializeAuth: () => Promise<void>;
+  refreshProfile: () => Promise<boolean>;
+  updateUser: (data: Partial<User>) => void;
+  /** @deprecated use initializeAuth or refreshProfile */
+  loadUser: () => Promise<void>;
+}
+
+async function persistUser(user: User) {
+  await cacheUser(user);
+  return user;
+}
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+  user: null,
+  isAuthenticated: false,
+  isLoading: true,
+
+  login: async (email, password, rememberMe) => {
+    const result = await api.login(email, password, rememberMe) as {
+      user: User;
+      accessToken: string;
+      refreshToken: string;
+    };
+    await saveTokens(result.accessToken, result.refreshToken);
+    await persistUser(result.user);
+    await socketService.connect();
+    set({ user: result.user, isAuthenticated: true, isLoading: false });
+  },
+
+  register: async (data) => {
+    await api.register(data);
+  },
+
+  verifyEmail: async (email, code) => {
+    const result = await api.verifyEmail(email, code) as {
+      user: User;
+      accessToken: string;
+      refreshToken: string;
+    };
+    await saveTokens(result.accessToken, result.refreshToken);
+    await persistUser(result.user);
+    await socketService.connect();
+    try {
+      const profile = await api.getProfile() as User;
+      await persistUser(profile);
+      set({ user: profile, isAuthenticated: true, isLoading: false });
+    } catch {
+      set({ user: result.user, isAuthenticated: true, isLoading: false });
+    }
+  },
+
+  logout: async () => {
+    try {
+      const refresh = await getRefreshToken();
+      if (refresh) await api.logout(refresh);
+    } catch {
+      // ignore
+    }
+    socketService.disconnect();
+    await clearTokens();
+    set({ user: null, isAuthenticated: false, isLoading: false });
+  },
+
+  initializeAuth: async () => {
+    try {
+      set({ isLoading: true });
+      const token = await getAccessToken();
+      if (!token) {
+        set({ user: null, isAuthenticated: false, isLoading: false });
+        return;
+      }
+
+      const cached = await getCachedUser<User>();
+      if (cached) {
+        set({ user: cached, isAuthenticated: true });
+      }
+
+      const user = await api.getProfile() as User;
+      await persistUser(user);
+      await socketService.connect();
+      set({ user, isAuthenticated: true, isLoading: false });
+    } catch (err) {
+      const token = await getAccessToken();
+      const cached = await getCachedUser<User>();
+      const isSessionExpired =
+        err instanceof ApiError &&
+        (err.message === 'Session expired' || err.code === 'UNAUTHORIZED');
+
+      if (isSessionExpired || !token) {
+        await clearTokens();
+        set({ user: null, isAuthenticated: false, isLoading: false });
+      } else if (cached) {
+        set({ user: cached, isAuthenticated: true, isLoading: false });
+      } else {
+        set({ isAuthenticated: true, isLoading: false });
+      }
+    }
+  },
+
+  refreshProfile: async () => {
+    try {
+      const user = await api.getProfile() as User;
+      await persistUser(user);
+      set({ user, isAuthenticated: true });
+      return true;
+    } catch (err) {
+      if (err instanceof ApiError && err.message === 'Session expired') {
+        await clearTokens();
+        set({ user: null, isAuthenticated: false });
+        return false;
+      }
+
+      const cached = await getCachedUser<User>();
+      if (cached) {
+        set({ user: cached, isAuthenticated: true });
+      }
+      return false;
+    }
+  },
+
+  loadUser: async () => {
+    return get().refreshProfile();
+  },
+
+  updateUser: (data) => {
+    const current = get().user;
+    if (current) {
+      const updated = { ...current, ...data };
+      cacheUser(updated);
+      set({ user: updated });
+    }
+  },
+}));
