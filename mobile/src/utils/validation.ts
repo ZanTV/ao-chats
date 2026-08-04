@@ -20,9 +20,15 @@ export function formatApiError(err: {
     if (messages.length > 0) return messages.join('\n');
   }
   const msg = err.error || err.message;
-  if (msg) return msg;
-  if (err.code === 'INTERNAL_ERROR') {
-    return 'Server error. The API may need to be redeployed — try again later.';
+  if (msg) {
+    // Browser/AsyncStorage often surfaces "Unexpected token..." / "Unexpected error"
+    if (/unexpected/i.test(msg)) {
+      return 'Could not load or save your data. Please try again.';
+    }
+    return msg;
+  }
+  if (err.code === 'INTERNAL_ERROR' || err.code === 'DB_ERROR') {
+    return 'Server database error. Please try again in a moment.';
   }
   return 'Something went wrong';
 }

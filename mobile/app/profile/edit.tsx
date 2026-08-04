@@ -126,10 +126,19 @@ export default function EditProfileScreen() {
         avatarId,
       }) as Record<string, unknown>;
       updateUser(updated as Parameters<typeof updateUser>[0]);
-      await loadUser();
+      const refreshed = await loadUser();
+      if (!refreshed) {
+        // Local update already applied — still treat as saved
+      }
       Alert.alert('Success', t.profile.saved, [{ text: 'OK', onPress: () => router.back() }]);
     } catch (err) {
-      Alert.alert('Error', err instanceof Error ? err.message : t.common.error);
+      const message =
+        err instanceof Error
+          ? (/unexpected/i.test(err.message)
+              ? 'Could not save your profile. Please try again.'
+              : err.message)
+          : t.common.error;
+      Alert.alert('Error', message);
     } finally {
       setLoading(false);
     }

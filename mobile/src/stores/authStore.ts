@@ -43,7 +43,7 @@ interface AuthState {
   refreshProfile: () => Promise<boolean>;
   updateUser: (data: Partial<User>) => void;
   /** @deprecated use initializeAuth or refreshProfile */
-  loadUser: () => Promise<void>;
+  loadUser: () => Promise<boolean>;
 }
 
 async function persistUser(user: User) {
@@ -105,13 +105,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   initializeAuth: async () => {
     set({ isLoading: true });
     try {
-      const token = await withTimeout(getAccessToken(), 5000, null);
+      const token = await withTimeout(getAccessToken(), 5000, null).catch(() => null);
       if (!token) {
         set({ user: null, isAuthenticated: false, isLoading: false });
         return;
       }
 
-      const cached = await withTimeout(getCachedUser<User>(), 5000, null);
+      const cached = await withTimeout(getCachedUser<User>(), 5000, null).catch(() => null);
       if (cached) {
         set({ user: cached, isAuthenticated: true, isLoading: false });
         socketService.connect().catch(() => {});
@@ -144,10 +144,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         (err.message === 'Session expired' || err.code === 'UNAUTHORIZED');
 
       if (isSessionExpired || !token) {
-        await clearTokens();
+        await clearTokens().catch(() => {});
         set({ user: null, isAuthenticated: false, isLoading: false });
       } else if (cached) {
+        // Offline / temporary DB issue — keep cached session
         set({ user: cached, isAuthenticated: true, isLoading: false });
+        socketService.connect().catch(() => {});
       } else {
         set({ user: null, isAuthenticated: false, isLoading: false });
       }
@@ -161,15 +163,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user, isAuthenticated: true });
       return true;
     } catch (err) {
-      if (err instanceof ApiError && err.message === 'Session expired') {
-        await clearTokens();
+      if (err instanceof ApiError && (err.message === 'Session expired' || err.code === 'UNAUTHORIZED')) {
+        await clearTokens().catch(() => {});
         set({ user: null, isAuthenticated: false });
         return false;
       }
 
-      const cached = await getCachedUser<User>();
+      const cached = await getCachedUser<User>().catch(() => null);
       if (cached) {
         set({ user: cached, isAuthenticated: true });
+        return true;
       }
       return false;
     }

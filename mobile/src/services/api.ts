@@ -3,7 +3,9 @@ import { getApiUrl, API_TIMEOUT_MS } from './config';
 import { formatApiError, ApiError } from '../utils/validation';
 
 class ApiClient {
-  private baseUrl = getApiUrl();
+  private get baseUrl() {
+    return getApiUrl();
+  }
 
   private async fetchWithTimeout(
     url: string,
@@ -22,11 +24,24 @@ class ApiClient {
         );
       }
       throw new ApiError(
-        `Cannot reach server at ${this.baseUrl}. Check your internet connection.`,
+        'Cannot reach the AO Chats server. Check your internet connection.',
         'NETWORK_ERROR'
       );
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  private async parseJsonSafe(response: Response): Promise<Record<string, unknown>> {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new ApiError(
+        'Could not load or save data from the server. Please try again.',
+        'INVALID_RESPONSE'
+      );
     }
   }
 
@@ -50,7 +65,7 @@ class ApiClient {
     } catch (err) {
       if (err instanceof ApiError) throw err;
       throw new ApiError(
-        `Cannot reach server at ${this.baseUrl}. Check your internet connection.`,
+        'Cannot reach the AO Chats server. Check your internet connection.',
         'NETWORK_ERROR'
       );
     }
@@ -65,20 +80,22 @@ class ApiClient {
           headers,
         });
         if (!retry.ok) {
-          const err = await retry.json().catch(() => ({ error: 'Request failed' }));
-          throw new ApiError(formatApiError(err), err.code);
+          const err = await this.parseJsonSafe(retry).catch(() => ({ error: 'Request failed' }));
+          throw new ApiError(formatApiError(err as { error?: string }), (err as { code?: string }).code);
         }
-        return retry.json();
+        return (await this.parseJsonSafe(retry)) as T;
       }
       throw new ApiError('Session expired', 'UNAUTHORIZED');
     }
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new ApiError(formatApiError(err), err.code);
+      const err = await this.parseJsonSafe(response).catch(() => ({
+        error: `Request failed (${response.status})`,
+      }));
+      throw new ApiError(formatApiError(err as { error?: string }), (err as { code?: string }).code);
     }
 
-    return response.json();
+    return (await this.parseJsonSafe(response)) as T;
   }
 
   private async refreshToken(): Promise<boolean> {
@@ -97,7 +114,12 @@ class ApiClient {
         return false;
       }
 
-      const { accessToken } = await response.json();
+      const data = await this.parseJsonSafe(response);
+      const accessToken = String(data.accessToken || '');
+      if (!accessToken) {
+        await clearTokens();
+        return false;
+      }
       await saveTokens(accessToken, refresh);
       return true;
     } catch {

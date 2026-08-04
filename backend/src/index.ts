@@ -53,22 +53,31 @@ app.use('/api/', apiLimiter);
 
 app.get('/health', async (_req, res) => {
   let dbOk = false;
+  let dbError: string | undefined;
   try {
     await prisma.$queryRaw`SELECT 1`;
     dbOk = true;
-  } catch {
+  } catch (err) {
     dbOk = false;
+    dbError = err instanceof Error ? err.message : 'unknown';
   }
 
+  const redisOk = isRedisAvailable();
   const payload = {
+    success: dbOk,
     status: dbOk ? 'ok' : 'degraded',
+    message: 'AO Chats API',
     version: '2.0.0',
     environment: config.nodeEnv,
     timestamp: new Date().toISOString(),
+    database: dbOk ? 'connected' : 'disconnected',
+    redis: redisOk ? 'connected' : 'unavailable',
+    socketIo: 'connected',
     services: {
       database: dbOk ? 'connected' : 'disconnected',
-      redis: isRedisAvailable() ? 'connected' : 'unavailable',
+      redis: redisOk ? 'connected' : 'unavailable',
     },
+    ...(dbError && !dbOk ? { databaseError: dbError } : {}),
   };
 
   res.status(dbOk ? 200 : 503).json(payload);

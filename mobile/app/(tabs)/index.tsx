@@ -70,14 +70,16 @@ export default function HomeScreen() {
   const loadConversations = useCallback(async () => {
     try {
       const cached = await getCachedData<Conversation[]>('conversations');
-      if (cached) setConversations(sortConversations(cached));
+      if (cached?.length) setConversations(sortConversations(cached));
 
       const result = await api.getConversations() as { conversations: Conversation[] };
-      const sorted = sortConversations(result.conversations);
+      const sorted = sortConversations(result.conversations || []);
       setConversations(sorted);
       await cacheData('conversations', sorted);
     } catch {
-      // use cached data on error
+      // Keep showing cached conversations if network/DB fails
+      const cached = await getCachedData<Conversation[]>('conversations').catch(() => null);
+      if (cached?.length) setConversations(sortConversations(cached));
     } finally {
       setLoading(false);
       setRefreshing(false);

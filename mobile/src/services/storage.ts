@@ -4,14 +4,67 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const TOKEN_KEY = 'ao_access_token';
 const REFRESH_KEY = 'ao_refresh_token';
+const USER_CACHE_KEY = 'cache:user_profile';
 
 const isWeb = Platform.OS === 'web';
 
+function safeParse<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function safeStringify(value: unknown): string | null {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+async function memoryFallbackGet(key: string): Promise<string | null> {
+  try {
+    if (typeof globalThis !== 'undefined' && (globalThis as { __aoMem?: Map<string, string> }).__aoMem) {
+      return (globalThis as { __aoMem: Map<string, string> }).__aoMem.get(key) ?? null;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+async function memoryFallbackSet(key: string, value: string): Promise<void> {
+  try {
+    const g = globalThis as { __aoMem?: Map<string, string> };
+    if (!g.__aoMem) g.__aoMem = new Map();
+    g.__aoMem.set(key, value);
+  } catch {
+    // ignore
+  }
+}
+
+async function memoryFallbackDelete(key: string): Promise<void> {
+  try {
+    (globalThis as { __aoMem?: Map<string, string> }).__aoMem?.delete(key);
+  } catch {
+    // ignore
+  }
+}
+
 async function setSecureItem(key: string, value: string): Promise<void> {
   if (isWeb) {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(key, value);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(key, value);
+        return;
+      }
+    } catch {
+      // fall through to memory
     }
+    await memoryFallbackSet(key, value);
     return;
   }
   try {
@@ -19,37 +72,55 @@ async function setSecureItem(key: string, value: string): Promise<void> {
       keychainAccessible: SecureStore.WHEN_UNLOCKED,
     });
   } catch {
-    // Fallback: token storage failed — auth will prompt login
+    await memoryFallbackSet(key, value);
   }
 }
 
 async function getSecureItem(key: string): Promise<string | null> {
   if (isWeb) {
-    if (typeof localStorage === 'undefined') return null;
-    return localStorage.getItem(key);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        return localStorage.getItem(key);
+      }
+    } catch {
+      // fall through
+    }
+    return memoryFallbackGet(key);
   }
   try {
     return await SecureStore.getItemAsync(key, {
       keychainAccessible: SecureStore.WHEN_UNLOCKED,
     });
   } catch {
-    return null;
+    return memoryFallbackGet(key);
   }
 }
 
 async function deleteSecureItem(key: string): Promise<void> {
   if (isWeb) {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem(key);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // ignore
     }
+    await memoryFallbackDelete(key);
     return;
   }
-  await SecureStore.deleteItemAsync(key);
+  try {
+    await SecureStore.deleteItemAsync(key);
+  } catch {
+    // ignore
+  }
+  await memoryFallbackDelete(key);
 }
 
 export async function saveTokens(accessToken: string, refreshToken: string) {
-  await setSecureItem(TOKEN_KEY, accessToken);
-  await setSecureItem(REFRESH_KEY, refreshToken);
+  await Promise.all([
+    setSecureItem(TOKEN_KEY, accessToken),
+    setSecureItem(REFRESH_KEY, refreshToken),
+  ]);
 }
 
 export async function getAccessToken(): Promise<string | null> {
@@ -61,46 +132,105 @@ export async function getRefreshToken(): Promise<string | null> {
 }
 
 export async function clearTokens() {
-  await deleteSecureItem(TOKEN_KEY);
-  await deleteSecureItem(REFRESH_KEY);
-  await clearCachedUser();
+  await Promise.all([
+    deleteSecureItem(TOKEN_KEY),
+    deleteSecureItem(REFRESH_KEY),
+    clearCachedUser(),
+  ]);
 }
 
-const USER_CACHE_KEY = 'cache:user_profile';
+async function storageSet(key: string, value: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(key, value);
+  } catch {
+    if (isWeb) {
+      try {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
+        else await memoryFallbackSet(key, value);
+      } catch {
+        await memoryFallbackSet(key, value);
+      }
+    } else {
+      await memoryFallbackSet(key, value);
+    }
+  }
+}
+
+async function storageGet(key: string): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(key);
+  } catch {
+    if (isWeb) {
+      try {
+        if (typeof localStorage !== 'undefined') return localStorage.getItem(key);
+      } catch {
+        // ignore
+      }
+    }
+    return memoryFallbackGet(key);
+  }
+}
+
+async function storageRemove(key: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+  if (isWeb) {
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
+    } catch {
+      // ignore
+    }
+  }
+  await memoryFallbackDelete(key);
+}
 
 export async function cacheUser(user: unknown) {
-  await AsyncStorage.setItem(USER_CACHE_KEY, JSON.stringify(user));
+  const raw = safeStringify(user);
+  if (!raw) return;
+  await storageSet(USER_CACHE_KEY, raw);
 }
 
 export async function getCachedUser<T>(): Promise<T | null> {
-  const raw = await AsyncStorage.getItem(USER_CACHE_KEY);
-  return raw ? JSON.parse(raw) : null;
+  const raw = await storageGet(USER_CACHE_KEY);
+  return safeParse<T>(raw);
 }
 
 export async function clearCachedUser() {
-  await AsyncStorage.removeItem(USER_CACHE_KEY);
+  await storageRemove(USER_CACHE_KEY);
 }
 
 export async function cacheData(key: string, data: unknown) {
-  await AsyncStorage.setItem(`cache:${key}`, JSON.stringify(data));
+  const raw = safeStringify(data);
+  if (!raw) return;
+  await storageSet(`cache:${key}`, raw);
 }
 
 export async function getCachedData<T>(key: string): Promise<T | null> {
-  const raw = await AsyncStorage.getItem(`cache:${key}`);
-  return raw ? JSON.parse(raw) : null;
+  const raw = await storageGet(`cache:${key}`);
+  return safeParse<T>(raw);
 }
 
 export async function clearCache() {
-  const keys = await AsyncStorage.getAllKeys();
-  const cacheKeys = keys.filter((k) => k.startsWith('cache:'));
-  if (cacheKeys.length > 0) await AsyncStorage.multiRemove(cacheKeys);
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const cacheKeys = keys.filter((k) => k.startsWith('cache:'));
+    if (cacheKeys.length > 0) await AsyncStorage.multiRemove(cacheKeys);
+  } catch {
+    // ignore — cache clear is best-effort
+  }
 }
 
 export async function getSetting<T>(key: string, defaultValue: T): Promise<T> {
-  const raw = await AsyncStorage.getItem(`setting:${key}`);
-  return raw ? JSON.parse(raw) : defaultValue;
+  const raw = await storageGet(`setting:${key}`);
+  const parsed = safeParse<T>(raw);
+  return parsed ?? defaultValue;
 }
 
 export async function setSetting(key: string, value: unknown) {
-  await AsyncStorage.setItem(`setting:${key}`, JSON.stringify(value));
+  const raw = safeStringify(value);
+  if (!raw) return;
+  await storageSet(`setting:${key}`, raw);
 }

@@ -54,17 +54,29 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
 
   setTheme: async (theme) => {
-    await setSetting('theme', theme);
+    try {
+      await setSetting('theme', theme);
+    } catch {
+      // keep UI change even if persistence fails
+    }
     set({ theme, colors: Colors[theme] });
   },
 
   setFontSize: async (fontSize) => {
-    await setSetting('fontSize', fontSize);
+    try {
+      await setSetting('fontSize', fontSize);
+    } catch {
+      // keep UI change
+    }
     set({ fontSize, fonts: FontSize[fontSize] });
   },
 
   setLanguage: async (language) => {
-    await setSetting('language', language);
+    try {
+      await setSetting('language', language);
+    } catch {
+      // keep UI change
+    }
     set({ language, t: language === 'sw' ? sw : en });
   },
 }));
