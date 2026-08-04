@@ -20,6 +20,7 @@ interface JwtPayload {
 }
 
 const typingUsers = new Map<string, Set<string>>();
+const messageQueue = new Map<string, unknown[]>();
 
 export function setupSocketIO(httpServer: HttpServer): Server {
   const corsOrigins = parseCorsOrigins();
@@ -47,25 +48,30 @@ export function setupSocketIO(httpServer: HttpServer): Server {
         select: { id: true, emailVerified: true },
       });
 
-      if (!user || !user.emailVerified) return next(new Error('Unauthorized'));
+      if (!user) return next(new Error('User not found'));
+      
+      // Allow connection even if email not verified (but they can't send messages)
       socket.userId = user.id;
       socket.data.userId = user.id;
+      socket.data.emailVerified = user.emailVerified;
       next();
-    } catch {
+    } catch (err) {
       next(new Error('Invalid token'));
     }
   });
 
   io.on('connection', async (socket: AuthenticatedSocket) => {
     const userId = socket.userId!;
-    console.log(`User connected: ${userId}`);
+    const emailVerified = socket.data.emailVerified as boolean;
+    console.log(`User connected: ${userId}, emailVerified: ${emailVerified}`);
 
     socket.join(`user:${userId}`);
 
+    // Update user status
     await prisma.user.update({
       where: { id: userId },
       data: { status: 'ONLINE', lastSeen: new Date() },
-    });
+    }).catch(() => {});
 
     try {
       const redis = getRedis();
@@ -74,8 +80,10 @@ export function setupSocketIO(httpServer: HttpServer): Server {
       // Redis optional at connect time
     }
 
+    // Broadcast online status
     socket.broadcast.emit('user:online', { userId });
 
+    // Process pending messages
     try {
       const participations = await prisma.participant.findMany({
         where: { userId },
@@ -90,8 +98,8 @@ export function setupSocketIO(httpServer: HttpServer): Server {
           });
         }
       }
-    } catch {
-      // non-blocking
+    } catch (err) {
+      console.error('Error promoting waiting messages:', err);
     }
 
     socket.on('conversation:join', async (conversationId: string) => {
@@ -99,8 +107,8 @@ export function setupSocketIO(httpServer: HttpServer): Server {
       try {
         await deliverPendingMessages(io, conversationId, userId);
         await messageService.promoteWaitingToSent(conversationId, userId);
-      } catch {
-        // non-blocking
+      } catch (err) {
+        console.error('Error joining conversation:', err);
       }
     });
 
@@ -116,6 +124,24 @@ export function setupSocketIO(httpServer: HttpServer): Server {
       tempId?: string;
     }) => {
       try {
+        // Check if email is verified before allowing message send
+        if (!emailVerified) {
+          const updatedUser = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { emailVerified: true },
+          });
+          socket.data.emailVerified = updatedUser?.emailVerified || false;
+          
+          if (!socket.data.emailVerified) {
+            socket.emit('message:error', {
+              tempId: data.tempId,
+              error: 'Please verify your email before sending messages',
+              code: 'EMAIL_NOT_VERIFIED',
+            });
+            return;
+          }
+        }
+
         await createAndDispatchMessage(
           io,
           data.conversationId,
@@ -134,41 +160,49 @@ export function setupSocketIO(httpServer: HttpServer): Server {
     });
 
     socket.on('message:read', async (data: { conversationId: string; messageIds?: string[] }) => {
-      const result = await conversationService.markAsRead(data.conversationId, userId);
+      try {
+        const result = await conversationService.markAsRead(data.conversationId, userId);
 
-      io.to(`conversation:${data.conversationId}`).emit('message:read', {
-        conversationId: data.conversationId,
-        userId,
-        readAt: result.readAt,
-      });
-
-      io.to(`conversation:${data.conversationId}`).emit('message:status:bulk', {
-        conversationId: data.conversationId,
-        status: 'READ',
-        readAt: result.readAt,
-        readerId: userId,
-      });
-
-      if (result.notificationsMarked > 0) {
-        io.to(`user:${userId}`).emit('notification:read', {
+        io.to(`conversation:${data.conversationId}`).emit('message:read', {
           conversationId: data.conversationId,
-          count: result.notificationsMarked,
+          userId,
+          readAt: result.readAt,
         });
-      }
 
-      await emitConversationUpdated(io, data.conversationId, undefined, {
-        readerId: userId,
-        unreadCount: 0,
-      });
+        io.to(`conversation:${data.conversationId}`).emit('message:status:bulk', {
+          conversationId: data.conversationId,
+          status: 'READ',
+          readAt: result.readAt,
+          readerId: userId,
+        });
+
+        if (result.notificationsMarked > 0) {
+          io.to(`user:${userId}`).emit('notification:read', {
+            conversationId: data.conversationId,
+            count: result.notificationsMarked,
+          });
+        }
+
+        await emitConversationUpdated(io, data.conversationId, undefined, {
+          readerId: userId,
+          unreadCount: 0,
+        });
+      } catch (err) {
+        console.error('Error marking message as read:', err);
+      }
     });
 
     socket.on('message:delivered', async (data: { messageId: string; conversationId: string }) => {
-      const deliveredAt = await messageService.markDelivered(data.messageId);
-      emitMessageStatus(io, data.conversationId, {
-        messageId: data.messageId,
-        status: 'DELIVERED',
-        deliveredAt,
-      });
+      try {
+        const deliveredAt = await messageService.markDelivered(data.messageId);
+        emitMessageStatus(io, data.conversationId, {
+          messageId: data.messageId,
+          status: 'DELIVERED',
+          deliveredAt,
+        });
+      } catch (err) {
+        console.error('Error marking message as delivered:', err);
+      }
     });
 
     socket.on('typing:start', (data: { conversationId: string }) => {
@@ -271,10 +305,16 @@ export function setupSocketIO(httpServer: HttpServer): Server {
     });
 
     socket.on('message:unpin', async (data: { messageId: string; conversationId: string }) => {
-      await messageService.unpinMessage(data.messageId, data.conversationId, userId);
-      io.to(`conversation:${data.conversationId}`).emit('message:unpin', {
-        messageId: data.messageId,
-      });
+      try {
+        await messageService.unpinMessage(data.messageId, data.conversationId, userId);
+        io.to(`conversation:${data.conversationId}`).emit('message:unpin', {
+          messageId: data.messageId,
+        });
+      } catch (err) {
+        socket.emit('message:error', {
+          error: err instanceof Error ? err.message : 'Failed to unpin',
+        });
+      }
     });
 
     socket.on('message:star', async (data: { messageId: string; conversationId: string }) => {
@@ -295,13 +335,19 @@ export function setupSocketIO(httpServer: HttpServer): Server {
     });
 
     socket.on('message:unstar', async (data: { messageId: string; conversationId: string }) => {
-      await messageService.unstarMessage(data.messageId, userId);
-      io.to(`user:${userId}`).emit('message:star', {
-        messageId: data.messageId,
-        userId,
-        starred: false,
-        conversationId: data.conversationId,
-      });
+      try {
+        await messageService.unstarMessage(data.messageId, userId);
+        io.to(`user:${userId}`).emit('message:star', {
+          messageId: data.messageId,
+          userId,
+          starred: false,
+          conversationId: data.conversationId,
+        });
+      } catch (err) {
+        socket.emit('message:error', {
+          error: err instanceof Error ? err.message : 'Failed to unstar',
+        });
+      }
     });
 
     socket.on('friend:request', async (data: { receiverId: string; request: unknown }) => {
@@ -318,7 +364,7 @@ export function setupSocketIO(httpServer: HttpServer): Server {
       await prisma.user.update({
         where: { id: userId },
         data: { status: 'OFFLINE', lastSeen: new Date() },
-      });
+      }).catch(() => {});
 
       try {
         const redis = getRedis();

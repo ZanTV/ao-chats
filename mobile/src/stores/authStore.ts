@@ -35,6 +35,7 @@ interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  emailVerificationPending: boolean;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   register: (data: Record<string, unknown>) => Promise<void>;
   verifyEmail: (email: string, code: string) => Promise<void>;
@@ -42,6 +43,7 @@ interface AuthState {
   initializeAuth: () => Promise<void>;
   refreshProfile: () => Promise<boolean>;
   updateUser: (data: Partial<User>) => void;
+  setEmailVerificationPending: (pending: boolean) => void;
   /** @deprecated use initializeAuth or refreshProfile */
   loadUser: () => Promise<boolean>;
 }
@@ -55,38 +57,59 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isAuthenticated: false,
   isLoading: true,
+  emailVerificationPending: false,
+
+  setEmailVerificationPending: (pending) => {
+    set({ emailVerificationPending: pending });
+  },
 
   login: async (email, password, rememberMe) => {
-    const result = await api.login(email, password, rememberMe) as {
-      user: User;
-      accessToken: string;
-      refreshToken: string;
-    };
-    await saveTokens(result.accessToken, result.refreshToken);
-    await persistUser(result.user);
-    await socketService.connect();
-    set({ user: result.user, isAuthenticated: true, isLoading: false });
+    try {
+      const result = await api.login(email, password, rememberMe) as {
+        user: User;
+        accessToken: string;
+        refreshToken: string;
+      };
+      await saveTokens(result.accessToken, result.refreshToken);
+      await persistUser(result.user);
+      await socketService.connect();
+      set({ user: result.user, isAuthenticated: true, isLoading: false, emailVerificationPending: false });
+    } catch (err) {
+      // Check if error is EMAIL_NOT_VERIFIED
+      if (err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED') {
+        set({ emailVerificationPending: true, isLoading: false });
+        throw err; // Re-throw so the UI can navigate to verification screen
+      }
+      throw err;
+    }
   },
 
   register: async (data) => {
     await api.register(data);
+    set({ emailVerificationPending: true });
   },
 
   verifyEmail: async (email, code) => {
-    const result = await api.verifyEmail(email, code) as {
-      user: User;
-      accessToken: string;
-      refreshToken: string;
-    };
-    await saveTokens(result.accessToken, result.refreshToken);
-    await persistUser(result.user);
-    await socketService.connect();
     try {
-      const profile = await api.getProfile() as User;
-      await persistUser(profile);
-      set({ user: profile, isAuthenticated: true, isLoading: false });
-    } catch {
-      set({ user: result.user, isAuthenticated: true, isLoading: false });
+      const result = await api.verifyEmail(email, code) as {
+        user: User;
+        accessToken: string;
+        refreshToken: string;
+      };
+      await saveTokens(result.accessToken, result.refreshToken);
+      await persistUser(result.user);
+      await socketService.connect();
+      try {
+        const profile = await api.getProfile() as User;
+        await persistUser(profile);
+        set({ user: profile, isAuthenticated: true, isLoading: false, emailVerificationPending: false });
+      } catch {
+        set({ user: result.user, isAuthenticated: true, isLoading: false, emailVerificationPending: false });
+      }
+    } catch (err) {
+      // Keep emailVerificationPending as true if verification fails
+      set({ isLoading: false });
+      throw err;
     }
   },
 
@@ -99,7 +122,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     socketService.disconnect();
     await clearTokens();
-    set({ user: null, isAuthenticated: false, isLoading: false });
+    set({ user: null, isAuthenticated: false, isLoading: false, emailVerificationPending: false });
   },
 
   initializeAuth: async () => {
@@ -107,18 +130,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const token = await withTimeout(getAccessToken(), 5000, null).catch(() => null);
       if (!token) {
-        set({ user: null, isAuthenticated: false, isLoading: false });
+        set({ user: null, isAuthenticated: false, isLoading: false, emailVerificationPending: false });
         return;
       }
 
       const cached = await withTimeout(getCachedUser<User>(), 5000, null).catch(() => null);
       if (cached) {
-        set({ user: cached, isAuthenticated: true, isLoading: false });
+        set({ user: cached, isAuthenticated: true, isLoading: false, emailVerificationPending: false });
         socketService.connect().catch(() => {});
         api.getProfile()
           .then(async (user) => {
-            await persistUser(user as User);
-            set({ user: user as User, isAuthenticated: true });
+            const profile = user as User;
+            await persistUser(profile);
+            set({ user: profile, isAuthenticated: true, emailVerificationPending: false });
           })
           .catch(async (err) => {
             if (
@@ -126,7 +150,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               (err.message === 'Session expired' || err.code === 'UNAUTHORIZED')
             ) {
               await clearTokens();
-              set({ user: null, isAuthenticated: false });
+              set({ user: null, isAuthenticated: false, emailVerificationPending: false });
             }
           });
         return;
@@ -135,7 +159,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const user = await withTimeout(api.getProfile(), INIT_TIMEOUT_MS) as User;
       await persistUser(user);
       socketService.connect().catch(() => {});
-      set({ user, isAuthenticated: true, isLoading: false });
+      set({ user, isAuthenticated: true, isLoading: false, emailVerificationPending: false });
     } catch (err) {
       const token = await getAccessToken().catch(() => null);
       const cached = await getCachedUser<User>().catch(() => null);
@@ -145,13 +169,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       if (isSessionExpired || !token) {
         await clearTokens().catch(() => {});
-        set({ user: null, isAuthenticated: false, isLoading: false });
+        set({ user: null, isAuthenticated: false, isLoading: false, emailVerificationPending: false });
       } else if (cached) {
         // Offline / temporary DB issue — keep cached session
-        set({ user: cached, isAuthenticated: true, isLoading: false });
+        set({ user: cached, isAuthenticated: true, isLoading: false, emailVerificationPending: false });
         socketService.connect().catch(() => {});
       } else {
-        set({ user: null, isAuthenticated: false, isLoading: false });
+        set({ user: null, isAuthenticated: false, isLoading: false, emailVerificationPending: false });
       }
     }
   },
@@ -160,18 +184,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const user = await api.getProfile() as User;
       await persistUser(user);
-      set({ user, isAuthenticated: true });
+      set({ user, isAuthenticated: true, emailVerificationPending: false });
       return true;
     } catch (err) {
       if (err instanceof ApiError && (err.message === 'Session expired' || err.code === 'UNAUTHORIZED')) {
         await clearTokens().catch(() => {});
-        set({ user: null, isAuthenticated: false });
+        set({ user: null, isAuthenticated: false, emailVerificationPending: false });
         return false;
       }
 
       const cached = await getCachedUser<User>().catch(() => null);
       if (cached) {
-        set({ user: cached, isAuthenticated: true });
+        set({ user: cached, isAuthenticated: true, emailVerificationPending: false });
         return true;
       }
       return false;
