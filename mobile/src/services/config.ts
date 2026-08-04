@@ -92,3 +92,30 @@ export function getAppUrl(): string {
 export function getAppName(): string {
   return process.env.EXPO_PUBLIC_APP_NAME || 'AO Chats';
 }
+
+export const INIT_TIMEOUT_MS = 12000;
+export const API_TIMEOUT_MS = 15000;
+
+/** Wrap a promise with a timeout. Rejects if time expires (unless fallback is set). */
+export function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  fallback?: T
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (fallback !== undefined) resolve(fallback);
+      else reject(new Error(`Operation timed out after ${ms}ms`));
+    }, ms);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}

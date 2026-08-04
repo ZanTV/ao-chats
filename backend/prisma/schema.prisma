@@ -214,7 +214,10 @@ model MessageReaction {
   message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([messageId, userId, emoji])
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+  @@index([createdAt])
   @@map("message_reactions")
 }
 
@@ -230,6 +233,8 @@ model MessagePin {
 
   @@unique([messageId, conversationId])
   @@index([conversationId])
+  @@index([messageId])
+  @@index([createdAt])
   @@map("message_pins")
 }
 
@@ -245,6 +250,9 @@ model StarredMessage {
 
   @@unique([userId, messageId])
   @@index([userId])
+  @@index([messageId])
+  @@index([conversationId])
+  @@index([createdAt])
   @@map("starred_messages")
 }
 

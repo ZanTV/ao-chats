@@ -149,7 +149,17 @@ export function setupSocketIO(httpServer: HttpServer): Server {
         readerId: userId,
       });
 
-      await emitConversationUpdated(io, data.conversationId);
+      if (result.notificationsMarked > 0) {
+        io.to(`user:${userId}`).emit('notification:read', {
+          conversationId: data.conversationId,
+          count: result.notificationsMarked,
+        });
+      }
+
+      await emitConversationUpdated(io, data.conversationId, undefined, {
+        readerId: userId,
+        unreadCount: 0,
+      });
     });
 
     socket.on('message:delivered', async (data: { messageId: string; conversationId: string }) => {
@@ -184,13 +194,21 @@ export function setupSocketIO(httpServer: HttpServer): Server {
     socket.on('message:react', async (data: { messageId: string; emoji: string; conversationId: string }) => {
       try {
         const result = await messageService.reactToMessage(data.messageId, userId, data.emoji);
-        io.to(`conversation:${data.conversationId}`).emit('message:react', {
+        const payload = {
           messageId: data.messageId,
           ...result,
           userId,
-        });
+        };
 
-        if (result.action === 'added') {
+        io.to(`conversation:${data.conversationId}`).emit('message:react', payload);
+
+        if (result.action === 'removed') {
+          io.to(`conversation:${data.conversationId}`).emit('message:reaction:remove', payload);
+        } else {
+          io.to(`conversation:${data.conversationId}`).emit('message:reaction:add', payload);
+        }
+
+        if (result.action === 'added' || result.action === 'replaced') {
           const message = await prisma.message.findUnique({
             where: { id: data.messageId },
             include: { sender: { select: { firstName: true } } },
@@ -262,11 +280,12 @@ export function setupSocketIO(httpServer: HttpServer): Server {
     socket.on('message:star', async (data: { messageId: string; conversationId: string }) => {
       try {
         const star = await messageService.starMessage(data.messageId, userId);
-        io.to(`conversation:${data.conversationId}`).emit('message:star', {
+        io.to(`user:${userId}`).emit('message:star', {
           messageId: data.messageId,
           userId,
           starred: true,
           star,
+          conversationId: data.conversationId,
         });
       } catch (err) {
         socket.emit('message:error', {
@@ -277,10 +296,11 @@ export function setupSocketIO(httpServer: HttpServer): Server {
 
     socket.on('message:unstar', async (data: { messageId: string; conversationId: string }) => {
       await messageService.unstarMessage(data.messageId, userId);
-      io.to(`conversation:${data.conversationId}`).emit('message:star', {
+      io.to(`user:${userId}`).emit('message:star', {
         messageId: data.messageId,
         userId,
         starred: false,
+        conversationId: data.conversationId,
       });
     });
 

@@ -144,6 +144,16 @@ export default function SettingsScreen() {
         <Section title={t.settings.privacy} colors={colors} fonts={fonts}>
           <TouchableOpacity
             style={[styles.linkRow, { borderBottomColor: colors.border }]}
+            onPress={() => router.push('/starred')}
+          >
+            <Ionicons name="star-outline" size={22} color={colors.text} />
+            <Text style={[styles.linkText, { color: colors.text, fontSize: fonts.md }]}>
+              {t.chat.starredMessages}
+            </Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.linkRow, { borderBottomColor: colors.border }]}
             onPress={() => router.push('/settings/blocked')}
           >
             <Ionicons name="ban-outline" size={22} color={colors.text} />

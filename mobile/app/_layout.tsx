@@ -1,7 +1,9 @@
 import 'react-native-gesture-handler';
-import React, { useEffect } from 'react';
+import 'react-native-reanimated';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Stack, Redirect, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from '../src/stores/authStore';
@@ -10,6 +12,9 @@ import { useNotificationStore } from '../src/stores/notificationStore';
 import { LoadingScreen } from '../src/components/LoadingScreen';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { NotificationPanel } from '../src/components/NotificationPanel';
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuthStore();
   const segments = useSegments();
@@ -30,13 +35,15 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout() {
-  const { initializeAuth, isAuthenticated } = useAuthStore();
+  const { initializeAuth, isAuthenticated, isLoading } = useAuthStore();
   const { isLoaded, loadSettings, theme } = useSettingsStore();
   const initializeNotifications = useNotificationStore((s) => s.initialize);
+  const [appReady, setAppReady] = useState(false);
 
   useEffect(() => {
-    loadSettings();
-    initializeAuth();
+    Promise.all([loadSettings(), initializeAuth()]).finally(() => {
+      setAppReady(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -44,14 +51,26 @@ export default function RootLayout() {
     return initializeNotifications();
   }, [isAuthenticated, initializeNotifications]);
 
-  if (!isLoaded) {
-    return <LoadingScreen />;
+  const onLayoutRootView = useCallback(async () => {
+    if (appReady && isLoaded && !isLoading) {
+      await SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [appReady, isLoaded, isLoading]);
+
+  useEffect(() => {
+    if (appReady && isLoaded && !isLoading) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [appReady, isLoaded, isLoading]);
+
+  if (!isLoaded || !appReady) {
+    return <LoadingScreen onLayout={onLayoutRootView} />;
   }
 
   return (
     <ErrorBoundary>
       <SafeAreaProvider>
-        <GestureHandlerRootView style={{ flex: 1 }}>
+        <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
           <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
           <NotificationPanel />
           <AuthGuard>
@@ -63,6 +82,7 @@ export default function RootLayout() {
               <Stack.Screen name="(auth)/forgot-password" />
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="chat/[id]" options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="starred" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="profile/edit" options={{ animation: 'slide_from_bottom' }} />
               <Stack.Screen name="settings/blocked" options={{ animation: 'slide_from_right' }} />
             </Stack>
@@ -70,4 +90,5 @@ export default function RootLayout() {
         </GestureHandlerRootView>
       </SafeAreaProvider>
     </ErrorBoundary>
-  );}
+  );
+}

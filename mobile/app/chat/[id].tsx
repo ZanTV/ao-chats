@@ -22,8 +22,12 @@ import { ReplyPreviewBar } from '../../src/components/chat/ReplyPreviewBar';
 import { ReactionPicker } from '../../src/components/chat/ReactionPicker';
 import { ForwardSheet } from '../../src/components/chat/ForwardSheet';
 import { MessageInfoSheet } from '../../src/components/chat/MessageInfoSheet';
+import { PinnedBar } from '../../src/components/chat/PinnedBar';
+import { PinnedHistorySheet, PinnedEntry } from '../../src/components/chat/PinnedHistorySheet';
+import { UnreadDivider } from '../../src/components/chat/UnreadDivider';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
+import { useNotificationStore } from '../../src/stores/notificationStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
 import { cacheData, getCachedData } from '../../src/services/storage';
@@ -39,9 +43,14 @@ import { Spacing, BorderRadius } from '../../src/theme';
 
 type Message = ChatMessage;
 
+type ListItem =
+  | { kind: 'divider' }
+  | { kind: 'message'; message: Message };
+
 interface ConversationInfo {
   participants: Array<{
     userId: string;
+    lastReadAt?: string | null;
     user: {
       id: string;
       firstName: string;
@@ -61,10 +70,12 @@ function normalizeId(id: string | string[] | undefined): string | undefined {
 }
 
 export default function ChatScreen() {
-  const params = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id: string; highlight?: string }>();
   const conversationId = normalizeId(params.id);
+  const highlightParam = normalizeId(params.highlight);
   const { user } = useAuthStore();
   const { colors, fonts, t } = useSettingsStore();
+  const { markConversationNotificationsRead } = useNotificationStore();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -73,6 +84,11 @@ export default function ChatScreen() {
   const [isTyping, setIsTyping] = useState(false);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [pinnedMessages, setPinnedMessages] = useState<Message[]>([]);
+  const [pinnedEntries, setPinnedEntries] = useState<PinnedEntry[]>([]);
+  const [showPinnedHistory, setShowPinnedHistory] = useState(false);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [showUnreadDivider, setShowUnreadDivider] = useState(false);
+  const [lastReadAt, setLastReadAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -86,23 +102,28 @@ export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const typingTimeout = useRef<NodeJS.Timeout>();
   const messagesRef = useRef<Message[]>([]);
+  const stickToBottomRef = useRef(true);
+  const isJumpingRef = useRef(false);
+  const unreadSessionRef = useRef(false);
+  const highlightDoneRef = useRef<string | null>(null);
 
   const otherUser = conversation?.participants.find((p) => p.userId !== user?.id)?.user;
   const recipientOnline = otherUser?.status === 'ONLINE';
 
-  const actionLabels = useMemo(
-    () => ({
+  const actionLabels = useMemo(() => {
+    const selectedId = actionTarget?.id || Array.from(selectedIds)[0];
+    const selectedMsg = selectedId ? messages.find((m) => m.id === selectedId) : null;
+    return {
       reply: t.chat.reply,
       react: t.chat.react,
       forward: t.chat.forward,
-      pin: t.chat.pin,
+      pin: selectedId && pinnedIds.has(selectedId) ? t.chat.unpin : t.chat.pin,
       copy: t.chat.copy,
-      star: t.chat.star,
+      star: selectedMsg?.isStarred ? t.chat.unstar : t.chat.star,
       info: t.chat.info,
       delete: t.chat.delete,
-    }),
-    [t]
-  );
+    };
+  }, [t, actionTarget, selectedIds, pinnedIds, messages]);
 
   const persistMessages = useCallback(async (list: Message[]) => {
     if (!conversationId || list.length === 0) return;
@@ -150,13 +171,35 @@ export default function ChatScreen() {
         api.getPinnedMessages(conversationId),
       ]);
       setConversation(convRes as ConversationInfo);
-      const pins = ((pinsRes as { pins: Array<{ message: Record<string, unknown>; messageId: string }> }).pins || []);
-      setPinnedMessages(pins.map((p) => normalizeMessage(p.message)));
+      const pins = ((pinsRes as { pins: Array<{ message: Record<string, unknown>; messageId: string; createdAt: string; pinnedBy?: { firstName: string } }> }).pins || []);
+      const normalizedPins = pins.map((p) => normalizeMessage(p.message));
+      setPinnedMessages(normalizedPins);
       setPinnedIds(new Set(pins.map((p) => p.messageId)));
+      setPinnedEntries(
+        pins.map((p) => ({
+          messageId: p.messageId,
+          message: normalizeMessage(p.message),
+          pinnedAt: p.createdAt,
+          pinnedByName: p.pinnedBy?.firstName,
+          senderName: (p.message as { sender?: { firstName?: string } }).sender?.firstName,
+        }))
+      );
+
+      const me = (convRes as ConversationInfo).participants.find((p) => p.userId === user?.id);
+      // Capture unread cursor once per visit so the divider stays visible after mark-read.
+      if (!unreadSessionRef.current) {
+        const previousReadAt = me?.lastReadAt ?? null;
+        setLastReadAt(previousReadAt);
+        const hasUnread = messagesRef.current.some(
+          (m) => m.senderId !== user?.id && (!previousReadAt || m.createdAt > previousReadAt)
+        );
+        setShowUnreadDivider(hasUnread);
+        unreadSessionRef.current = true;
+      }
     } catch {
       // non-blocking
     }
-  }, [conversationId]);
+  }, [conversationId, user?.id]);
 
   const clearSelection = () => {
     setSelectedIds(new Set());
@@ -176,24 +219,90 @@ export default function ChatScreen() {
     setActionTarget(message);
   };
 
-  const scrollToMessage = (messageId: string) => {
-    const index = messages.findIndex((m) => m.id === messageId);
-    if (index >= 0) {
-      flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+  const scrollToMessage = useCallback(async (messageId: string) => {
+    if (!conversationId) return;
+    isJumpingRef.current = true;
+    stickToBottomRef.current = false;
+
+    let msgs = messagesRef.current;
+    let msgIndex = msgs.findIndex((m) => m.id === messageId);
+
+    if (msgIndex < 0) {
+      try {
+        const around = await api.getMessagesAround(conversationId, messageId);
+        const normalized = (around.messages || []).map(normalizeMessage);
+        const merged = dedupeMessages([...normalized, ...messagesRef.current]).sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+        applyMessages(merged);
+        msgs = messagesRef.current;
+        msgIndex = msgs.findIndex((m) => m.id === messageId);
+      } catch {
+        isJumpingRef.current = false;
+        return;
+      }
     }
-  };
+
+    if (msgIndex < 0) {
+      isJumpingRef.current = false;
+      return;
+    }
+
+    let flatIndex = msgIndex;
+    if (showUnreadDivider && lastReadAt && user?.id) {
+      const dividerAt = msgs.findIndex(
+        (m) => m.senderId !== user.id && m.createdAt > lastReadAt
+      );
+      if (dividerAt >= 0 && msgIndex >= dividerAt) flatIndex += 1;
+    }
+
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToIndex({
+        index: flatIndex,
+        animated: true,
+        viewPosition: 0.45,
+      });
+      setHighlightedId(messageId);
+      setTimeout(() => setHighlightedId(null), 2500);
+      setTimeout(() => {
+        isJumpingRef.current = false;
+      }, 800);
+    });
+  }, [conversationId, showUnreadDivider, lastReadAt, user?.id, applyMessages]);
 
   useFocusEffect(
     useCallback(() => {
       if (!conversationId) return;
+      unreadSessionRef.current = false;
+      highlightDoneRef.current = null;
+      stickToBottomRef.current = true;
       setLoading(true);
-      loadMessages();
-      loadConversationMeta();
-      socketService.joinConversation(conversationId);
-      socketService.markRead(conversationId);
-      return () => socketService.leaveConversation(conversationId);
-    }, [conversationId, loadMessages, loadConversationMeta])
+
+      const openChat = async () => {
+        await loadMessages();
+        await loadConversationMeta();
+        socketService.joinConversation(conversationId);
+        // Mark read after capturing unread cursor so divider can render for this visit.
+        socketService.markRead(conversationId);
+        markConversationNotificationsRead(conversationId);
+      };
+
+      openChat();
+
+      return () => {
+        socketService.leaveConversation(conversationId);
+        setShowUnreadDivider(false);
+        unreadSessionRef.current = false;
+      };
+    }, [conversationId, loadMessages, loadConversationMeta, markConversationNotificationsRead])
   );
+
+  useEffect(() => {
+    if (!highlightParam || messages.length === 0) return;
+    if (highlightDoneRef.current === highlightParam) return;
+    highlightDoneRef.current = highlightParam;
+    scrollToMessage(highlightParam);
+  }, [highlightParam, messages.length, scrollToMessage]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -205,8 +314,21 @@ export default function ChatScreen() {
         updateMessages((prev) => upsertMessage(prev, msg, raw.tempId));
         if (msg.senderId !== user?.id && conversationId) {
           socketService.markDelivered(msg.id, conversationId);
+          if (stickToBottomRef.current) {
+            socketService.markRead(conversationId);
+          }
         }
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+        if (stickToBottomRef.current && !isJumpingRef.current) {
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+        }
+      }),
+      socketService.on('message:reply', (data: unknown) => {
+        const raw = data as Record<string, unknown> & { tempId?: string };
+        const msg = normalizeMessage(raw);
+        updateMessages((prev) => upsertMessage(prev, msg, raw.tempId));
+        if (stickToBottomRef.current && !isJumpingRef.current) {
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+        }
       }),
       socketService.on('message:error', (data: unknown) => {
         const { tempId, error } = data as { tempId?: string; error?: string };
@@ -260,6 +382,7 @@ export default function ChatScreen() {
           action: string;
           emoji: string;
           userId: string;
+          previousEmoji?: string;
           reaction?: { user: { firstName: string } };
         };
         updateMessages((prev) =>
@@ -268,15 +391,14 @@ export default function ChatScreen() {
             if (payload.action === 'removed') {
               return {
                 ...m,
-                reactions: m.reactions.filter(
-                  (r) => !(r.userId === payload.userId && r.emoji === payload.emoji)
-                ),
+                reactions: m.reactions.filter((r) => r.userId !== payload.userId),
               };
             }
+            const withoutUser = m.reactions.filter((r) => r.userId !== payload.userId);
             return {
               ...m,
               reactions: [
-                ...m.reactions,
+                ...withoutUser,
                 {
                   emoji: payload.emoji,
                   userId: payload.userId,
@@ -331,7 +453,20 @@ export default function ChatScreen() {
       type: 'TEXT',
       replyToId,
       replyTo: replyTo
-        ? { id: replyTo.id, content: replyTo.content, sender: { firstName: replyTo.replyTo?.sender?.firstName || '' } }
+        ? {
+            id: replyTo.id,
+            content: replyTo.content,
+            type: replyTo.type,
+            deletedForAll: replyTo.deletedForAll,
+            isDeleted: replyTo.isDeleted,
+            senderId: replyTo.senderId,
+            sender: {
+              firstName:
+                replyTo.senderId === user.id
+                  ? t.chat.you
+                  : otherUser?.firstName || 'User',
+            },
+          }
         : undefined,
       reactions: [],
       createdAt: new Date().toISOString(),
@@ -340,6 +475,7 @@ export default function ChatScreen() {
       waitingAt: recipientOnline ? undefined : new Date().toISOString(),
     };
 
+    stickToBottomRef.current = true;
     updateMessages((prev) => [...prev, optimistic]);
     setInputText('');
     setReplyTo(null);
@@ -411,8 +547,30 @@ export default function ChatScreen() {
         break;
       case 'pin':
         if (pinnedIds.has(message.id)) {
+          setPinnedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(message.id);
+            return next;
+          });
+          setPinnedMessages((prev) => prev.filter((m) => m.id !== message.id));
+          setPinnedEntries((prev) => prev.filter((p) => p.messageId !== message.id));
           socketService.unpinMessage(message.id, conversationId);
         } else {
+          setPinnedIds((prev) => new Set(prev).add(message.id));
+          setPinnedMessages((prev) => [message, ...prev.filter((m) => m.id !== message.id)]);
+          setPinnedEntries((prev) => [
+            {
+              messageId: message.id,
+              message,
+              pinnedAt: new Date().toISOString(),
+              pinnedByName: user?.firstName,
+              senderName:
+                message.senderId === user?.id
+                  ? user?.firstName
+                  : otherUser?.firstName,
+            },
+            ...prev.filter((p) => p.messageId !== message.id),
+          ]);
           socketService.pinMessage(message.id, conversationId);
         }
         clearSelection();
@@ -422,6 +580,11 @@ export default function ChatScreen() {
         clearSelection();
         break;
       case 'star':
+        updateMessages((prev) =>
+          prev.map((m) =>
+            m.id === message.id ? { ...m, isStarred: !message.isStarred } : m
+          )
+        );
         if (message.isStarred) {
           socketService.unstarMessage(message.id, conversationId);
         } else {
@@ -459,8 +622,62 @@ export default function ChatScreen() {
     }
   };
 
-  const formatTime = (dateStr: string) =>
-    new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const firstUnreadIndex = useMemo(() => {
+    if (!lastReadAt || !user?.id) return -1;
+    return messages.findIndex(
+      (m) => m.senderId !== user.id && m.createdAt > lastReadAt
+    );
+  }, [messages, lastReadAt, user?.id]);
+
+  const listData = useMemo((): ListItem[] => {
+    if (!showUnreadDivider || firstUnreadIndex < 0) {
+      return messages.map((message) => ({ kind: 'message' as const, message }));
+    }
+    const items: ListItem[] = [];
+    messages.forEach((message, index) => {
+      if (index === firstUnreadIndex) items.push({ kind: 'divider' });
+      items.push({ kind: 'message', message });
+    });
+    return items;
+  }, [messages, showUnreadDivider, firstUnreadIndex]);
+
+  const getUserReaction = (message: Message) =>
+    message.reactions.find((r) => r.userId === user?.id)?.emoji;
+
+  const applyLocalReaction = useCallback((messageId: string, emoji: string) => {
+    if (!user?.id) return;
+    updateMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== messageId) return m;
+        const mine = m.reactions.find((r) => r.userId === user.id);
+        if (mine?.emoji === emoji) {
+          return { ...m, reactions: m.reactions.filter((r) => r.userId !== user.id) };
+        }
+        return {
+          ...m,
+          reactions: [
+            ...m.reactions.filter((r) => r.userId !== user.id),
+            { emoji, userId: user.id, user: { firstName: user.firstName || 'You' } },
+          ],
+        };
+      })
+    );
+  }, [user?.id, user?.firstName, updateMessages]);
+
+  const handleReactionSelect = (emoji: string) => {
+    const msg = getPrimarySelected();
+    if (msg && conversationId) {
+      applyLocalReaction(msg.id, emoji);
+      socketService.react(msg.id, emoji, conversationId);
+    }
+    clearSelection();
+  };
+
+  const handleReactionChipPress = (message: Message, emoji: string) => {
+    if (!conversationId) return;
+    applyLocalReaction(message.id, emoji);
+    socketService.react(message.id, emoji, conversationId);
+  };
 
   const bubbleColors = {
     bubbleSent: colors.bubbleSent,
@@ -473,28 +690,48 @@ export default function ChatScreen() {
     danger: colors.danger,
     warning: colors.warning,
     surface: colors.surface,
+    surfaceSecondary: colors.surfaceSecondary,
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
-    const isOwn = item.senderId === user?.id;
-    const isSelected = selectedIds.has(item.id);
+  const formatTime = (dateStr: string) =>
+    new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const renderListItem = ({ item }: { item: ListItem }) => {
+    if (item.kind === 'divider') {
+      return (
+        <UnreadDivider
+          label={t.chat.unreadMessages}
+          colors={colors}
+          fonts={fonts}
+        />
+      );
+    }
+
+    const message = item.message;
+    const isOwn = message.senderId === user?.id;
+    const isSelected = selectedIds.has(message.id);
 
     return (
       <View style={isSelected ? [styles.selectedWrap, { backgroundColor: colors.primary + '08' }] : undefined}>
         <SwipeableMessageRow
-          message={item}
+          message={message}
           isOwn={isOwn}
           isSelected={isSelected}
-          isPinned={pinnedIds.has(item.id)}
+          isPinned={pinnedIds.has(message.id)}
+          isHighlighted={highlightedId === message.id}
           colors={bubbleColors}
           fonts={fonts}
           formatTime={formatTime}
+          currentUserId={user?.id}
           onPress={() => {
-            if (selectionMode) toggleSelect(item);
-            else if (item.failed) retryMessage(item);
+            if (selectionMode) toggleSelect(message);
+            else if (message.failed) retryMessage(message);
           }}
-          onLongPress={() => toggleSelect(item)}
-          onSwipeReply={() => setReplyTo(item)}
+          onLongPress={() => toggleSelect(message)}
+          onSwipeReply={() => setReplyTo(message)}
+          onReplyPress={scrollToMessage}
+          onReactionPress={(emoji) => handleReactionChipPress(message, emoji)}
+          deletedLabel={t.chat.deletedMessage}
         />
       </View>
     );
@@ -539,16 +776,21 @@ export default function ChatScreen() {
       />
 
       {pinnedMessages.length > 0 && (
-        <TouchableOpacity
-          style={[styles.pinnedBar, { backgroundColor: colors.surfaceSecondary, borderBottomColor: colors.border }]}
-          onPress={() => scrollToMessage(pinnedMessages[0].id)}
-        >
-          <Ionicons name="pin" size={16} color={colors.primary} />
-          <Text style={[styles.pinnedText, { color: colors.text, fontSize: fonts.sm }]} numberOfLines={1}>
-            {pinnedMessages[0].content}
-          </Text>
-          <Text style={{ color: colors.textTertiary, fontSize: fonts.xs }}>{pinnedMessages.length}</Text>
-        </TouchableOpacity>
+        <PinnedBar
+          pins={pinnedMessages}
+          colors={{
+            surfaceSecondary: colors.surfaceSecondary,
+            border: colors.border,
+            primary: colors.primary,
+            text: colors.text,
+            textTertiary: colors.textTertiary,
+          }}
+          fonts={fonts}
+          pinLabel={t.chat.pinHeader}
+          deletedLabel={t.chat.deletedMessage}
+          onJumpToMessage={scrollToMessage}
+          onOpenHistory={() => setShowPinnedHistory(true)}
+        />
       )}
 
       {loading && messages.length === 0 ? (
@@ -566,12 +808,33 @@ export default function ChatScreen() {
       ) : (
         <FlatList
           ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
+          data={listData}
+          renderItem={renderListItem}
+          keyExtractor={(item, index) =>
+            item.kind === 'divider' ? `divider-${index}` : item.message.id
+          }
           contentContainerStyle={styles.messagesList}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-          onScrollToIndexFailed={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          onScroll={(e) => {
+            const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+            stickToBottomRef.current =
+              layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
+          }}
+          scrollEventThrottle={64}
+          onContentSizeChange={() => {
+            if (isJumpingRef.current) return;
+            if (stickToBottomRef.current) {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }
+          }}
+          onScrollToIndexFailed={(info) => {
+            setTimeout(() => {
+              flatListRef.current?.scrollToIndex({
+                index: info.index,
+                animated: true,
+                viewPosition: 0.45,
+              });
+            }, 120);
+          }}
           initialNumToRender={20}
           maxToRenderPerBatch={15}
           windowSize={11}
@@ -587,8 +850,13 @@ export default function ChatScreen() {
       {replyTo && (
         <ReplyPreviewBar
           replyTo={replyTo}
-          senderName={replyTo.senderId === user?.id ? t.chat.you : (replyTo.replyTo?.sender?.firstName || otherUser?.firstName || '')}
+          senderName={
+            replyTo.senderId === user?.id
+              ? t.chat.you
+              : otherUser?.firstName || ''
+          }
           replyLabel={t.chat.reply}
+          deletedLabel={t.chat.deletedMessage}
           onClose={() => setReplyTo(null)}
           onPress={() => scrollToMessage(replyTo.id)}
           colors={colors}
@@ -620,12 +888,21 @@ export default function ChatScreen() {
       <ReactionPicker
         visible={showReactionPicker}
         title={t.chat.react}
-        onSelect={(emoji) => {
-          const msg = getPrimarySelected();
-          if (msg && conversationId) socketService.react(msg.id, emoji, conversationId);
-          clearSelection();
-        }}
+        currentEmoji={getPrimarySelected() ? getUserReaction(getPrimarySelected()!) : undefined}
+        searchPlaceholder={t.chat.searchEmoji}
+        onSelect={handleReactionSelect}
         onClose={() => { setShowReactionPicker(false); clearSelection(); }}
+        colors={colors}
+        fonts={fonts}
+      />
+
+      <PinnedHistorySheet
+        visible={showPinnedHistory}
+        title={t.chat.pinned}
+        pins={pinnedEntries}
+        deletedLabel={t.chat.deletedMessage}
+        onClose={() => setShowPinnedHistory(false)}
+        onJumpToMessage={scrollToMessage}
         colors={colors}
         fonts={fonts}
       />

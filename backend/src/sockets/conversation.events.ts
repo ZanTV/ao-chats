@@ -17,7 +17,12 @@ export async function emitConversationUpdated(
     deletedForAll?: boolean;
     sender?: { firstName: string };
   },
-  options?: { reactionEmoji?: string; reactorId?: string }
+  options?: {
+    reactionEmoji?: string;
+    reactorId?: string;
+    readerId?: string;
+    unreadCount?: number;
+  }
 ) {
   const participants = await prisma.participant.findMany({
     where: { conversationId },
@@ -70,10 +75,19 @@ export async function emitConversationUpdated(
       };
     }
 
-    io.to(`user:${userId}`).emit('conversation:updated', {
+    const payload = {
       conversationId,
       updatedAt,
       lastMessage: payloadLastMessage,
-    });
+      unreadCount:
+        options?.readerId === userId
+          ? 0
+          : options?.unreadCount !== undefined
+            ? options.unreadCount
+            : undefined,
+    };
+
+    io.to(`user:${userId}`).emit('conversation:updated', payload);
+    io.to(`user:${userId}`).emit('conversation:update', payload);
   }
 }

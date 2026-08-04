@@ -26,6 +26,7 @@ interface ThemeColors {
   danger: string;
   warning: string;
   surface: string;
+  surfaceSecondary?: string;
 }
 
 interface Props {
@@ -33,12 +34,17 @@ interface Props {
   isOwn: boolean;
   isSelected: boolean;
   isPinned: boolean;
+  isHighlighted?: boolean;
   colors: ThemeColors;
   fonts: { xs: number; sm: number; md: number };
   formatTime: (iso: string) => string;
   onPress: () => void;
   onLongPress: () => void;
   onSwipeReply: () => void;
+  onReplyPress?: (messageId: string) => void;
+  onReactionPress?: (emoji: string) => void;
+  currentUserId?: string;
+  deletedLabel?: string;
 }
 
 export function SwipeableMessageRow(props: Props) {
@@ -83,9 +89,14 @@ export function SwipeableMessageRow(props: Props) {
             isOwn={props.isOwn}
             isSelected={props.isSelected}
             isPinned={props.isPinned}
+            isHighlighted={props.isHighlighted}
             colors={props.colors}
             fonts={props.fonts}
             formatTime={props.formatTime}
+            onReplyPress={props.onReplyPress}
+            onReactionPress={props.onReactionPress}
+            currentUserId={props.currentUserId}
+            deletedLabel={props.deletedLabel}
           />
         </Pressable>
       </Animated.View>

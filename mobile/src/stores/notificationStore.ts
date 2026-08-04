@@ -42,6 +42,7 @@ interface NotificationState {
   markRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
   deleteNotification: (id: string) => Promise<void>;
+  markConversationNotificationsRead: (conversationId: string, count?: number) => void;
   initialize: () => () => void;
 }
 
@@ -127,6 +128,28 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     });
   },
 
+  markConversationNotificationsRead: (conversationId, count = 0) => {
+    set((state) => {
+      let cleared = 0;
+      const notifications = state.notifications.map((n) => {
+        if (
+          !n.isRead &&
+          n.type === 'NEW_MESSAGE' &&
+          n.data?.conversationId === conversationId
+        ) {
+          cleared += 1;
+          return { ...n, isRead: true };
+        }
+        return n;
+      });
+      const decrement = count > 0 ? count : cleared;
+      return {
+        notifications,
+        unreadCount: Math.max(0, state.unreadCount - decrement),
+      };
+    });
+  },
+
   initialize: () => {
     get().refresh();
     get().refreshFriendStats();
@@ -146,6 +169,14 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       }),
       socketService.on('friend:accepted', () => {
         scheduleStatsRefresh(() => get().refreshFriendStats());
+      }),
+      socketService.on('notification:read', (data: unknown) => {
+        const payload = data as { conversationId?: string; count?: number };
+        if (payload.conversationId) {
+          get().markConversationNotificationsRead(payload.conversationId, payload.count);
+        } else {
+          scheduleRefresh(() => get().refresh());
+        }
       }),
     ];
 

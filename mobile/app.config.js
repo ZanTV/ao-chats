@@ -1,9 +1,8 @@
-import { ExpoConfig, ConfigContext } from 'expo/config';
-
 const APP_NAME = process.env.EXPO_PUBLIC_APP_NAME || 'AO Chats';
 const APP_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://www.aochats.chat';
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
+/** @type {import('expo/config').ExpoConfig} */
+module.exports = ({ config }) => ({
   ...config,
   name: APP_NAME,
   slug: 'ao-chats',
@@ -46,13 +45,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     typedRoutes: true,
   },
   extra: {
+    ...config.extra,
     appName: APP_NAME,
     appUrl: APP_URL,
     apiUrl: process.env.EXPO_PUBLIC_API_URL || 'https://api.aochats.chat/api',
     socketUrl: process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.aochats.chat',
     env: process.env.EXPO_PUBLIC_ENV || 'production',
     eas: {
-      projectId: process.env.EAS_PROJECT_ID,
+      ...config.extra?.eas,
+      projectId: process.env.EAS_PROJECT_ID || '076c3503-03fd-484e-8c0e-ed618f4d5934',
     },
   },
+  owner: 'ochobek',
 });

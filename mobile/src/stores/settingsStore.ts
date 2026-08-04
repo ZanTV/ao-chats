@@ -27,18 +27,30 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   isLoaded: false,
 
   loadSettings: async () => {
-    const theme = await getSetting<ThemeMode>('theme', 'light');
-    const fontSize = await getSetting<FontSizeMode>('fontSize', 'medium');
-    const language = await getSetting<Language>('language', 'en');
-    set({
-      theme,
-      fontSize,
-      language,
-      colors: Colors[theme],
-      fonts: FontSize[fontSize],
-      t: language === 'sw' ? sw : en,
-      isLoaded: true,
-    });
+    try {
+      const theme = await getSetting<ThemeMode>('theme', 'light');
+      const fontSize = await getSetting<FontSizeMode>('fontSize', 'medium');
+      const language = await getSetting<Language>('language', 'en');
+      set({
+        theme,
+        fontSize,
+        language,
+        colors: Colors[theme],
+        fonts: FontSize[fontSize],
+        t: language === 'sw' ? sw : en,
+        isLoaded: true,
+      });
+    } catch {
+      set({
+        theme: 'light',
+        fontSize: 'medium',
+        language: 'en',
+        colors: Colors.light,
+        fonts: FontSize.medium,
+        t: en,
+        isLoaded: true,
+      });
+    }
   },
 
   setTheme: async (theme) => {

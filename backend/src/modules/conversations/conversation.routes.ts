@@ -3,6 +3,8 @@ import { conversationService } from './conversation.service';
 import { authenticate, AuthRequest } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/errorHandler';
 import { paramId } from '../../utils/params';
+import { getIO } from '../../sockets';
+import { emitConversationUpdated } from '../../sockets/conversation.events';
 
 const router = Router();
 
@@ -62,7 +64,32 @@ router.patch(
 router.post(
   '/:id/read',
   asyncHandler(async (req: AuthRequest, res) => {
-    const result = await conversationService.markAsRead(paramId(req.params.id), req.userId!);
+    const conversationId = paramId(req.params.id);
+    const result = await conversationService.markAsRead(conversationId, req.userId!);
+    const io = getIO();
+    if (io) {
+      io.to(`conversation:${conversationId}`).emit('message:read', {
+        conversationId,
+        userId: req.userId,
+        readAt: result.readAt,
+      });
+      io.to(`conversation:${conversationId}`).emit('message:status:bulk', {
+        conversationId,
+        status: 'READ',
+        readAt: result.readAt,
+        readerId: req.userId,
+      });
+      if (result.notificationsMarked > 0) {
+        io.to(`user:${req.userId}`).emit('notification:read', {
+          conversationId,
+          count: result.notificationsMarked,
+        });
+      }
+      await emitConversationUpdated(io, conversationId, undefined, {
+        readerId: req.userId!,
+        unreadCount: 0,
+      });
+    }
     res.json(result);
   })
 );

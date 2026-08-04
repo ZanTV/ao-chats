@@ -10,6 +10,7 @@ import {
 } from '../services/storage';
 import { socketService } from '../services/socket';
 import { ApiError } from '../utils/validation';
+import { withTimeout, INIT_TIMEOUT_MS } from '../services/config';
 
 export interface User {
   id: string;
@@ -102,26 +103,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   initializeAuth: async () => {
+    set({ isLoading: true });
     try {
-      set({ isLoading: true });
-      const token = await getAccessToken();
+      const token = await withTimeout(getAccessToken(), 5000, null);
       if (!token) {
         set({ user: null, isAuthenticated: false, isLoading: false });
         return;
       }
 
-      const cached = await getCachedUser<User>();
+      const cached = await withTimeout(getCachedUser<User>(), 5000, null);
       if (cached) {
-        set({ user: cached, isAuthenticated: true });
+        set({ user: cached, isAuthenticated: true, isLoading: false });
+        socketService.connect().catch(() => {});
+        api.getProfile()
+          .then(async (user) => {
+            await persistUser(user as User);
+            set({ user: user as User, isAuthenticated: true });
+          })
+          .catch(async (err) => {
+            if (
+              err instanceof ApiError &&
+              (err.message === 'Session expired' || err.code === 'UNAUTHORIZED')
+            ) {
+              await clearTokens();
+              set({ user: null, isAuthenticated: false });
+            }
+          });
+        return;
       }
 
-      const user = await api.getProfile() as User;
+      const user = await withTimeout(api.getProfile(), INIT_TIMEOUT_MS) as User;
       await persistUser(user);
-      await socketService.connect();
+      socketService.connect().catch(() => {});
       set({ user, isAuthenticated: true, isLoading: false });
     } catch (err) {
-      const token = await getAccessToken();
-      const cached = await getCachedUser<User>();
+      const token = await getAccessToken().catch(() => null);
+      const cached = await getCachedUser<User>().catch(() => null);
       const isSessionExpired =
         err instanceof ApiError &&
         (err.message === 'Session expired' || err.code === 'UNAUTHORIZED');
@@ -132,7 +149,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       } else if (cached) {
         set({ user: cached, isAuthenticated: true, isLoading: false });
       } else {
-        set({ isAuthenticated: true, isLoading: false });
+        set({ user: null, isAuthenticated: false, isLoading: false });
       }
     }
   },

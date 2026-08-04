@@ -99,6 +99,20 @@ export class NotificationService {
     return { message: 'Notification deleted' };
   }
 
+  async markConversationNotificationsRead(userId: string, conversationId: string) {
+    const result = await prisma.notification.updateMany({
+      where: {
+        userId,
+        isRead: false,
+        type: 'NEW_MESSAGE',
+        data: { path: ['conversationId'], equals: conversationId },
+      },
+      data: { isRead: true },
+    });
+    await cacheDel(CacheKeys.notifications(userId));
+    return result.count;
+  }
+
   async notifyNewMessage(
     receiverId: string,
     senderName: string,

@@ -3,6 +3,7 @@ import { cacheDel, CacheKeys } from '../../config/redis';
 import { AppError } from '../../middleware/errorHandler';
 import { friendService } from '../friends/friend.service';
 import { messageService } from '../messages/message.service';
+import { notificationService } from '../notifications/notification.service';
 import { getAoManagerId } from '../../services/ao-manager.service';
 import { formatMessagePreview, sortConversations } from '../../utils/conversation.utils';
 
@@ -102,23 +103,21 @@ export class ConversationService {
       },
     });
 
-    const conversationIds = participations.map((p) => p.conversationId);
-
-    const unreadCounts = conversationIds.length > 0
-      ? await prisma.message.groupBy({
-          by: ['conversationId'],
+    const unreadEntries = await Promise.all(
+      participations.map(async (p) => {
+        const count = await prisma.message.count({
           where: {
-            conversationId: { in: conversationIds },
+            conversationId: p.conversationId,
             senderId: { not: userId },
-            readAt: null,
+            createdAt: { gt: p.lastReadAt ?? new Date(0) },
             deletedForAll: false,
             NOT: { deletedFor: { has: userId } },
           },
-          _count: { id: true },
-        })
-      : [];
-
-    const unreadMap = new Map(unreadCounts.map((u) => [u.conversationId, u._count.id]));
+        });
+        return [p.conversationId, count] as const;
+      })
+    );
+    const unreadMap = new Map(unreadEntries);
 
     const conversations = participations.map((p) => {
       const otherParticipant = p.conversation.participants.find((pp) => pp.userId !== userId);
@@ -197,15 +196,26 @@ export class ConversationService {
   }
 
   async markAsRead(conversationId: string, userId: string) {
+    const now = new Date();
     await prisma.participant.update({
       where: { conversationId_userId: { conversationId, userId } },
-      data: { lastReadAt: new Date() },
+      data: { lastReadAt: now },
     });
 
     const { readAt, count } = await messageService.markMessagesRead(conversationId, userId);
+    const notificationsMarked = await notificationService.markConversationNotificationsRead(
+      userId,
+      conversationId
+    );
 
-    await cacheDel(CacheKeys.userConversations(userId));
-    return { message: 'Marked as read', readAt, count };
+    await cacheDel(CacheKeys.userConversations(userId), CacheKeys.notifications(userId));
+    return {
+      message: 'Marked as read',
+      readAt,
+      count,
+      notificationsMarked,
+      unreadCount: 0,
+    };
   }
 }
 

@@ -26,6 +26,20 @@ router.get(
 );
 
 router.get(
+  '/:conversationId/around/:messageId',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const { limit } = req.query;
+    const messages = await messageService.getMessagesAround(
+      paramId(req.params.conversationId),
+      req.userId!,
+      paramId(req.params.messageId),
+      limit ? parseInt(limit as string, 10) : 50
+    );
+    res.json({ messages, count: messages.length });
+  })
+);
+
+router.get(
   '/:conversationId',
   asyncHandler(async (req: AuthRequest, res) => {
     const { cursor, limit } = req.query;
@@ -77,7 +91,16 @@ router.post(
 router.post(
   '/:messageId/star',
   asyncHandler(async (req: AuthRequest, res) => {
-    const star = await messageService.starMessage(paramId(req.params.messageId), req.userId!);
+    const messageId = paramId(req.params.messageId);
+    const star = await messageService.starMessage(messageId, req.userId!);
+    const io = getIO();
+    io?.to(`user:${req.userId}`).emit('message:star', {
+      messageId,
+      userId: req.userId,
+      starred: true,
+      star,
+      conversationId: star.conversationId,
+    });
     res.status(201).json(star);
   })
 );
@@ -85,7 +108,15 @@ router.post(
 router.delete(
   '/:messageId/star',
   asyncHandler(async (req: AuthRequest, res) => {
-    const result = await messageService.unstarMessage(paramId(req.params.messageId), req.userId!);
+    const messageId = paramId(req.params.messageId);
+    const result = await messageService.unstarMessage(messageId, req.userId!);
+    const io = getIO();
+    io?.to(`user:${req.userId}`).emit('message:star', {
+      messageId,
+      userId: req.userId,
+      starred: false,
+      conversationId: result.conversationId ?? undefined,
+    });
     res.json(result);
   })
 );
@@ -94,11 +125,18 @@ router.post(
   '/:messageId/react',
   validateBody(reactMessageSchema),
   asyncHandler(async (req: AuthRequest, res) => {
-    const result = await messageService.reactToMessage(
-      paramId(req.params.messageId),
-      req.userId!,
-      req.body.emoji
-    );
+    const messageId = paramId(req.params.messageId);
+    const result = await messageService.reactToMessage(messageId, req.userId!, req.body.emoji);
+    const payload = { messageId, ...result, userId: req.userId };
+    const io = getIO();
+    if (io && result.conversationId) {
+      io.to(`conversation:${result.conversationId}`).emit('message:react', payload);
+      if (result.action === 'removed') {
+        io.to(`conversation:${result.conversationId}`).emit('message:reaction:remove', payload);
+      } else {
+        io.to(`conversation:${result.conversationId}`).emit('message:reaction:add', payload);
+      }
+    }
     res.json(result);
   })
 );
@@ -133,11 +171,9 @@ router.post(
   '/:conversationId/pin',
   validateBody(pinMessageSchema),
   asyncHandler(async (req: AuthRequest, res) => {
-    const pin = await messageService.pinMessage(
-      req.body.messageId,
-      req.userId!,
-      paramId(req.params.conversationId)
-    );
+    const conversationId = paramId(req.params.conversationId);
+    const pin = await messageService.pinMessage(req.body.messageId, req.userId!, conversationId);
+    getIO()?.to(`conversation:${conversationId}`).emit('message:pin', pin);
     res.status(201).json(pin);
   })
 );
@@ -145,11 +181,10 @@ router.post(
 router.delete(
   '/:conversationId/pin/:messageId',
   asyncHandler(async (req: AuthRequest, res) => {
-    const result = await messageService.unpinMessage(
-      paramId(req.params.messageId),
-      paramId(req.params.conversationId),
-      req.userId!
-    );
+    const conversationId = paramId(req.params.conversationId);
+    const messageId = paramId(req.params.messageId);
+    const result = await messageService.unpinMessage(messageId, conversationId, req.userId!);
+    getIO()?.to(`conversation:${conversationId}`).emit('message:unpin', { messageId });
     res.json(result);
   })
 );

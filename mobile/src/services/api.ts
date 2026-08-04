@@ -1,9 +1,34 @@
 import { getAccessToken, getRefreshToken, saveTokens, clearTokens } from './storage';
-import { getApiUrl } from './config';
+import { getApiUrl, API_TIMEOUT_MS } from './config';
 import { formatApiError, ApiError } from '../utils/validation';
 
 class ApiClient {
   private baseUrl = getApiUrl();
+
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit = {},
+    timeoutMs = API_TIMEOUT_MS
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new ApiError(
+          'Server is taking too long to respond. Check your connection and try again.',
+          'TIMEOUT'
+        );
+      }
+      throw new ApiError(
+        `Cannot reach server at ${this.baseUrl}. Check your internet connection.`,
+        'NETWORK_ERROR'
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   private async request<T>(
     endpoint: string,
@@ -18,13 +43,14 @@ class ApiClient {
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${endpoint}`, {
+      response = await this.fetchWithTimeout(`${this.baseUrl}${endpoint}`, {
         ...options,
         headers,
       });
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
       throw new ApiError(
-        `Cannot reach server at ${this.baseUrl}. Check Wi-Fi and that backend is running.`,
+        `Cannot reach server at ${this.baseUrl}. Check your internet connection.`,
         'NETWORK_ERROR'
       );
     }
@@ -34,7 +60,10 @@ class ApiClient {
       if (refreshed) {
         const newToken = await getAccessToken();
         headers['Authorization'] = `Bearer ${newToken}`;
-        const retry = await fetch(`${this.baseUrl}${endpoint}`, { ...options, headers });
+        const retry = await this.fetchWithTimeout(`${this.baseUrl}${endpoint}`, {
+          ...options,
+          headers,
+        });
         if (!retry.ok) {
           const err = await retry.json().catch(() => ({ error: 'Request failed' }));
           throw new ApiError(formatApiError(err), err.code);
@@ -57,11 +86,11 @@ class ApiClient {
       const refresh = await getRefreshToken();
       if (!refresh) return false;
 
-      const response = await fetch(`${this.baseUrl}/auth/refresh`, {
+      const response = await this.fetchWithTimeout(`${this.baseUrl}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken: refresh }),
-      });
+      }, 10_000);
 
       if (!response.ok) {
         await clearTokens();
@@ -193,6 +222,10 @@ class ApiClient {
     const params = cursor ? `?cursor=${cursor}` : '';
     return this.request(`/messages/${conversationId}${params}`);
   };
+  getMessagesAround = (conversationId: string, messageId: string, limit = 50) =>
+    this.request<{ messages: Record<string, unknown>[] }>(
+      `/messages/${conversationId}/around/${messageId}?limit=${limit}`
+    );
   sendMessage = (conversationId: string, content: string, replyToId?: string, tempId?: string) =>
     this.request<{ message: Record<string, unknown> }>(`/messages/${conversationId}`, {
       method: 'POST',

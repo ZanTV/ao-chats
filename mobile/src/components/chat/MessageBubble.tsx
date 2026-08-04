@@ -1,9 +1,16 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { AoMessageStatus } from './AoMessageStatus';
 import { ChatMessage } from '../../utils/messages';
 import { getAoMessageStatus } from '../../utils/messageStatus';
+import { getReplyPreviewText } from '../../utils/replyPreview';
 import { BorderRadius, Spacing } from '../../theme';
 
 interface ThemeColors {
@@ -17,6 +24,7 @@ interface ThemeColors {
   danger: string;
   warning: string;
   surface: string;
+  surfaceSecondary?: string;
 }
 
 interface Props {
@@ -24,9 +32,77 @@ interface Props {
   isOwn: boolean;
   isSelected: boolean;
   isPinned: boolean;
+  isHighlighted?: boolean;
   colors: ThemeColors;
   fonts: { xs: number; sm: number; md: number };
   formatTime: (iso: string) => string;
+  onReplyPress?: (messageId: string) => void;
+  onReactionPress?: (emoji: string) => void;
+  currentUserId?: string;
+  deletedLabel?: string;
+}
+
+function ReplyQuote({
+  replyTo,
+  isOwn,
+  colors,
+  fonts,
+  onPress,
+  deletedLabel = 'This message was deleted',
+}: {
+  replyTo: NonNullable<ChatMessage['replyTo']>;
+  isOwn: boolean;
+  colors: ThemeColors;
+  fonts: { xs: number; sm: number };
+  onPress?: () => void;
+  deletedLabel?: string;
+}) {
+  const accent = isOwn ? 'rgba(255,255,255,0.9)' : colors.primary;
+  const bg = isOwn ? 'rgba(255,255,255,0.14)' : (colors.surfaceSecondary || colors.surface);
+  const nameColor = isOwn ? '#E0E7FF' : colors.primary;
+  const textColor = isOwn ? 'rgba(255,255,255,0.82)' : colors.textSecondary;
+  const preview = getReplyPreviewText(replyTo, deletedLabel);
+  const type = String(replyTo.type || '').toUpperCase();
+  const isMedia = ['IMAGE', 'VIDEO', 'FILE'].includes(type);
+
+  const content = (
+    <View style={[styles.replyContainer, { backgroundColor: bg, borderLeftColor: accent }]}>
+      <View style={styles.replyHeader}>
+        <Ionicons name="return-down-forward" size={12} color={accent} />
+        <Text style={[styles.replyName, { color: nameColor, fontSize: fonts.xs }]} numberOfLines={1}>
+          {replyTo.sender?.firstName || 'Reply'}
+        </Text>
+      </View>
+      <View style={styles.replyBody}>
+        {isMedia && (
+          <Ionicons
+            name={
+              type === 'IMAGE'
+                ? 'image-outline'
+                : type === 'VIDEO'
+                  ? 'videocam-outline'
+                  : 'document-outline'
+            }
+            size={13}
+            color={textColor}
+            style={{ marginRight: 4 }}
+          />
+        )}
+        <Text style={[styles.replyContent, { color: textColor, fontSize: fonts.xs }]} numberOfLines={2}>
+          {preview}
+        </Text>
+      </View>
+    </View>
+  );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={styles.replyWrap}>
+        {content}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={styles.replyWrap}>{content}</View>;
 }
 
 export function MessageBubble({
@@ -34,30 +110,52 @@ export function MessageBubble({
   isOwn,
   isSelected,
   isPinned,
+  isHighlighted,
   colors,
   fonts,
   formatTime,
+  onReplyPress,
+  onReactionPress,
+  currentUserId,
+  deletedLabel = 'This message was deleted',
 }: Props) {
+  const highlight = useSharedValue(0);
+
+  useEffect(() => {
+    if (isHighlighted) {
+      highlight.value = withSequence(
+        withTiming(1, { duration: 180 }),
+        withTiming(0, { duration: 2200 })
+      );
+    }
+  }, [isHighlighted, highlight]);
+
+  const highlightStyle = useAnimatedStyle(() => ({
+    backgroundColor: `rgba(37, 99, 235, ${highlight.value * 0.22})`,
+  }));
+
   const status = getAoMessageStatus(message, isOwn);
   const groupedReactions = message.reactions.reduce((acc, r) => {
-    acc[r.emoji] = (acc[r.emoji] || 0) + 1;
+    if (!acc[r.emoji]) acc[r.emoji] = { count: 0, mine: false };
+    acc[r.emoji].count += 1;
+    if (r.userId === currentUserId) acc[r.emoji].mine = true;
     return acc;
-  }, {} as Record<string, number>);
+  }, {} as Record<string, { count: number; mine: boolean }>);
 
   const bubbleBg = isOwn ? colors.bubbleSent : colors.bubbleReceived;
   const textColor = isOwn ? colors.bubbleSentText : colors.bubbleReceivedText;
 
   return (
-    <View style={[styles.wrap, isOwn ? styles.wrapOwn : styles.wrapOther]}>
+    <Animated.View style={[styles.wrap, isOwn ? styles.wrapOwn : styles.wrapOther, highlightStyle]}>
       {message.replyTo && (
-        <View style={[styles.replyBar, { borderLeftColor: colors.primary }]}>
-          <Text style={[styles.replyName, { color: colors.primary, fontSize: fonts.xs }]}>
-            {message.replyTo.sender?.firstName}
-          </Text>
-          <Text style={[styles.replyContent, { color: colors.textSecondary, fontSize: fonts.xs }]} numberOfLines={1}>
-            {message.replyTo.content}
-          </Text>
-        </View>
+        <ReplyQuote
+          replyTo={message.replyTo}
+          isOwn={isOwn}
+          colors={colors}
+          fonts={fonts}
+          deletedLabel={deletedLabel}
+          onPress={onReplyPress ? () => onReplyPress(message.replyTo!.id) : undefined}
+        />
       )}
 
       <View
@@ -83,7 +181,7 @@ export function MessageBubble({
         )}
 
         <Text style={[styles.messageText, { color: textColor, fontSize: fonts.md }]}>
-          {message.deletedForAll ? 'This message was deleted' : message.content}
+          {message.deletedForAll ? deletedLabel : message.content}
         </Text>
 
         <View style={styles.footer}>
@@ -103,25 +201,39 @@ export function MessageBubble({
 
       {Object.keys(groupedReactions).length > 0 && (
         <View style={[styles.reactionsBar, { backgroundColor: colors.surface }]}>
-          {Object.entries(groupedReactions).map(([emoji, count]) => (
-            <Text key={emoji} style={styles.reactionEmoji}>
-              {emoji}
-              {count > 1 ? count : ''}
-            </Text>
+          {Object.entries(groupedReactions).map(([emoji, meta]) => (
+            <Pressable
+              key={emoji}
+              style={[styles.reactionChip, meta.mine && { borderColor: colors.primary, borderWidth: 1 }]}
+              onPress={() => onReactionPress?.(emoji)}
+            >
+              <Text style={styles.reactionEmoji}>
+                {emoji}
+                {meta.count > 1 ? meta.count : ''}
+              </Text>
+            </Pressable>
           ))}
         </View>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { maxWidth: '82%' },
+  wrap: { maxWidth: '82%', borderRadius: BorderRadius.lg, padding: 2 },
   wrapOwn: { alignSelf: 'flex-end' },
   wrapOther: { alignSelf: 'flex-start' },
-  replyBar: { borderLeftWidth: 3, paddingLeft: Spacing.sm, marginBottom: 4, marginHorizontal: 4 },
-  replyName: { fontWeight: '700' },
-  replyContent: {},
+  replyWrap: { marginBottom: 4, marginHorizontal: 2 },
+  replyContainer: {
+    borderLeftWidth: 3.5,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.sm + 2,
+    paddingVertical: Spacing.xs + 3,
+  },
+  replyHeader: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  replyName: { fontWeight: '700', flexShrink: 1 },
+  replyBody: { flexDirection: 'row', alignItems: 'center' },
+  replyContent: { lineHeight: 16, flex: 1 },
   bubble: {
     borderRadius: BorderRadius.lg,
     paddingHorizontal: Spacing.md,
@@ -145,14 +257,20 @@ const styles = StyleSheet.create({
   statusWrap: { marginLeft: 4 },
   reactionsBar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 4,
     paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: BorderRadius.full,
     alignSelf: 'flex-start',
     marginTop: -6,
     marginLeft: Spacing.sm,
     elevation: 1,
+  },
+  reactionChip: {
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
   },
   reactionEmoji: { fontSize: 14 },
 });

@@ -14,7 +14,13 @@ async function setSecureItem(key: string, value: string): Promise<void> {
     }
     return;
   }
-  await SecureStore.setItemAsync(key, value);
+  try {
+    await SecureStore.setItemAsync(key, value, {
+      keychainAccessible: SecureStore.WHEN_UNLOCKED,
+    });
+  } catch {
+    // Fallback: token storage failed — auth will prompt login
+  }
 }
 
 async function getSecureItem(key: string): Promise<string | null> {
@@ -22,7 +28,13 @@ async function getSecureItem(key: string): Promise<string | null> {
     if (typeof localStorage === 'undefined') return null;
     return localStorage.getItem(key);
   }
-  return SecureStore.getItemAsync(key);
+  try {
+    return await SecureStore.getItemAsync(key, {
+      keychainAccessible: SecureStore.WHEN_UNLOCKED,
+    });
+  } catch {
+    return null;
+  }
 }
 
 async function deleteSecureItem(key: string): Promise<void> {

@@ -5,6 +5,28 @@ import { config } from '../../config';
 import { sanitizeInput } from '../../middleware/validation';
 import { MessageStatus } from '@prisma/client';
 
+const replyToSelect = {
+  id: true,
+  content: true,
+  senderId: true,
+  type: true,
+  deletedForAll: true,
+  isDeleted: true,
+  sender: { select: { firstName: true } },
+} as const;
+
+const messageListInclude = (userId: string) => ({
+  sender: {
+    select: { id: true, firstName: true, lastName: true, avatarId: true },
+  },
+  replyTo: { select: replyToSelect },
+  reactions: {
+    include: { user: { select: { id: true, firstName: true } } },
+  },
+  pins: true,
+  stars: { where: { userId }, select: { id: true } },
+});
+
 async function getRecipientStatus(conversationId: string, senderId: string) {
   const other = await prisma.participant.findFirst({
     where: { conversationId, userId: { not: senderId } },
@@ -55,9 +77,7 @@ export class MessageService {
           sender: {
             select: { id: true, firstName: true, lastName: true, avatarId: true },
           },
-          replyTo: {
-            select: { id: true, content: true, senderId: true },
-          },
+          replyTo: { select: replyToSelect },
           reactions: {
             include: { user: { select: { id: true, firstName: true } } },
           },
@@ -103,22 +123,7 @@ export class MessageService {
         NOT: { deletedFor: { has: userId } },
         ...(cursor ? { createdAt: { lt: new Date(cursor) } } : {}),
       },
-      include: {
-        sender: {
-          select: { id: true, firstName: true, lastName: true, avatarId: true },
-        },
-        replyTo: {
-          select: {
-            id: true, content: true, senderId: true,
-            sender: { select: { firstName: true } },
-          },
-        },
-        reactions: {
-          include: { user: { select: { id: true, firstName: true } } },
-        },
-        pins: true,
-        stars: { where: { userId }, select: { id: true } },
-      },
+      include: messageListInclude(userId),
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
@@ -130,6 +135,48 @@ export class MessageService {
     }
 
     return result;
+  }
+
+  /** Load a window of messages centered on a target message (for jump-to). */
+  async getMessagesAround(
+    conversationId: string,
+    userId: string,
+    messageId: string,
+    limit = 50
+  ) {
+    const participant = await prisma.participant.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+    if (!participant) throw new AppError(403, 'Not a participant');
+
+    const target = await prisma.message.findFirst({
+      where: { id: messageId, conversationId },
+    });
+    if (!target) throw new AppError(404, 'Message not found');
+
+    const half = Math.max(10, Math.floor(limit / 2));
+    const visibility = {
+      conversationId,
+      deletedForAll: false,
+      NOT: { deletedFor: { has: userId } },
+    };
+
+    const [before, after] = await Promise.all([
+      prisma.message.findMany({
+        where: { ...visibility, createdAt: { lte: target.createdAt } },
+        include: messageListInclude(userId),
+        orderBy: { createdAt: 'desc' },
+        take: half + 1,
+      }),
+      prisma.message.findMany({
+        where: { ...visibility, createdAt: { gt: target.createdAt } },
+        include: messageListInclude(userId),
+        orderBy: { createdAt: 'asc' },
+        take: half,
+      }),
+    ]);
+
+    return [...before.reverse(), ...after];
   }
 
   async searchMessages(conversationId: string, userId: string, query: string) {
@@ -164,14 +211,41 @@ export class MessageService {
     });
     if (!participant) throw new AppError(403, 'Not a participant');
 
-    const existing = await prisma.messageReaction.findUnique({
-      where: { messageId_userId_emoji: { messageId, userId, emoji } },
+    const existingByUser = await prisma.messageReaction.findFirst({
+      where: { messageId, userId },
     });
 
-    if (existing) {
-      await prisma.messageReaction.delete({ where: { id: existing.id } });
+    if (existingByUser) {
+      if (existingByUser.emoji === emoji) {
+        await prisma.messageReaction.delete({ where: { id: existingByUser.id } });
+        await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
+        return {
+          action: 'removed' as const,
+          emoji,
+          previousEmoji: emoji,
+          conversationId: message.conversationId,
+        };
+      }
+
+      const reaction = await prisma.messageReaction.update({
+        where: { id: existingByUser.id },
+        data: { emoji },
+        include: { user: { select: { id: true, firstName: true } } },
+      });
+
+      await prisma.conversation.update({
+        where: { id: message.conversationId },
+        data: { updatedAt: new Date() },
+      });
+
       await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
-      return { action: 'removed', emoji };
+      return {
+        action: 'replaced' as const,
+        emoji,
+        previousEmoji: existingByUser.emoji,
+        reaction,
+        conversationId: message.conversationId,
+      };
     }
 
     const reaction = await prisma.messageReaction.create({
@@ -185,7 +259,12 @@ export class MessageService {
     });
 
     await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
-    return { action: 'added', reaction };
+    return {
+      action: 'added' as const,
+      emoji,
+      reaction,
+      conversationId: message.conversationId,
+    };
   }
 
   async deleteMessage(messageId: string, userId: string, forEveryone: boolean) {
@@ -271,7 +350,7 @@ export class MessageService {
 
     await prisma.starredMessage.deleteMany({ where: { userId, messageId } });
     await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
-    return { message: 'Unstarred' };
+    return { message: 'Unstarred', conversationId: message.conversationId };
   }
 
   async getStarredMessages(userId: string) {
@@ -331,6 +410,7 @@ export class MessageService {
       },
     });
 
+    await cacheInvalidatePattern(`${CacheKeys.messages(conversationId)}:*`);
     return pin;
   }
 
@@ -341,6 +421,7 @@ export class MessageService {
     if (!participant) throw new AppError(403, 'Not a participant');
 
     await prisma.messagePin.deleteMany({ where: { messageId, conversationId } });
+    await cacheInvalidatePattern(`${CacheKeys.messages(conversationId)}:*`);
     return { message: 'Message unpinned' };
   }
 

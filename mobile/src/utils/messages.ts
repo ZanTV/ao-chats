@@ -4,7 +4,15 @@ export interface ChatMessage {
   senderId: string;
   type: string;
   replyToId?: string;
-  replyTo?: { id: string; content: string; sender: { firstName: string } };
+  replyTo?: {
+    id: string;
+    content: string;
+    type?: string;
+    deletedForAll?: boolean;
+    isDeleted?: boolean;
+    senderId?: string;
+    sender: { firstName: string };
+  };
   reactions: Array<{ emoji: string; userId: string; user: { firstName: string } }>;
   readAt?: string;
   deliveredAt?: string;

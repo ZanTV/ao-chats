@@ -41,3 +41,9 @@ backend/prisma/*.db-journal
 # Uploads (local dev)
 backend/uploads/
 .vercel
+
+# Local test / scaffold (not production app)
+mobile/dist-test/
+mobile/ao-chats/
+*.md.bak
+AO_PREMIUM_CHAT_REPORT.md

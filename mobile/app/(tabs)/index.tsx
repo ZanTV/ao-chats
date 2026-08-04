@@ -8,7 +8,7 @@ import {
   TextInput,
   RefreshControl,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../src/components/Avatar';
@@ -54,6 +54,7 @@ interface ConversationUpdatePayload {
   conversationId: string;
   updatedAt?: string;
   lastMessage?: Conversation['lastMessage'];
+  unreadCount?: number;
 }
 
 export default function HomeScreen() {
@@ -100,9 +101,13 @@ export default function HomeScreen() {
 
         if (payload.lastMessage) {
           updated.lastMessage = payload.lastMessage;
-          if (payload.lastMessage.senderId !== user?.id) {
+          if (payload.unreadCount === undefined && payload.lastMessage.senderId !== user?.id) {
             updated.unreadCount = (current.unreadCount || 0) + 1;
           }
+        }
+
+        if (payload.unreadCount !== undefined) {
+          updated.unreadCount = payload.unreadCount;
         }
 
         const next = [...prev];
@@ -113,10 +118,19 @@ export default function HomeScreen() {
     [loadConversations, user?.id]
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      loadConversations();
+    }, [loadConversations])
+  );
+
   useEffect(() => {
     loadConversations();
 
     const unsub1 = socketService.on('conversation:updated', (data: ConversationUpdatePayload) => {
+      applyConversationUpdate(data);
+    });
+    const unsubUpdate = socketService.on('conversation:update', (data: ConversationUpdatePayload) => {
       applyConversationUpdate(data);
     });
     const unsub2 = socketService.on('message:new', (data: { conversationId: string }) => {
@@ -127,6 +141,7 @@ export default function HomeScreen() {
 
     return () => {
       unsub1();
+      unsubUpdate();
       unsub2();
     };
   }, [loadConversations, applyConversationUpdate]);
