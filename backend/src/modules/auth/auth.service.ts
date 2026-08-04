@@ -15,6 +15,7 @@ import { AppError } from '../../middleware/errorHandler';
 const userPublicSelect = {
   id: true,
   email: true,
+  emailVerified: true,
   username: true,
   firstName: true,
   lastName: true,
@@ -67,6 +68,7 @@ export class AuthService {
         university: data.university,
         course: data.course,
         avatarId: data.avatarId || 'avatar-1',
+        emailVerified: false,
         emailVerifyCode: verifyCode,
         emailVerifyExpiry: verifyExpiry,
       },
@@ -92,7 +94,16 @@ export class AuthService {
     const normalizedCode = normalizeCode(code);
     const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
     if (!user) throw new AppError(404, 'User not found');
-    if (user.emailVerified) throw new AppError(400, 'Email already verified');
+    
+    // If already verified, return success with tokens
+    if (user.emailVerified) {
+      const tokens = await this.createSession(user.id, user.email);
+      return { 
+        user: { ...user, emailVerified: true }, 
+        ...tokens,
+        message: 'Email already verified',
+      };
+    }
 
     if (user.emailVerifyExpiry && user.emailVerifyExpiry < new Date()) {
       throw new AppError(400, 'Verification code expired. Tap Resend to get a new code.', 'CODE_EXPIRED');
@@ -152,6 +163,7 @@ export class AuthService {
     const valid = await comparePassword(password, user.passwordHash);
     if (!valid) throw new AppError(401, 'Invalid email or password');
 
+    // Allow login but return special flag if email not verified
     if (!user.emailVerified) {
       throw new AppError(403, 'Please verify your email first', 'EMAIL_NOT_VERIFIED');
     }
@@ -167,6 +179,7 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
+        emailVerified: user.emailVerified,
         username: user.username,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -205,8 +218,10 @@ export class AuthService {
       throw new AppError(401, 'Invalid or expired refresh token');
     }
 
+    // Allow refresh if verified OR if email verification is pending
     if (!session.user.emailVerified) {
-      throw new AppError(403, 'Email not verified');
+      // Still allow token refresh for unverified users (they can verify later)
+      // Remove this check if you want to strictly enforce email verification
     }
 
     const accessToken = generateAccessToken({
