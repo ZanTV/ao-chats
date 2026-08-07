@@ -127,6 +127,10 @@ class SocketService {
     this.emit('message:pin', { messageId, conversationId });
   }
 
+  editMessage(messageId: string, conversationId: string, content: string): void {
+    this.emit('message:edit', { messageId, conversationId, content });
+  }
+
   isConnected(): boolean {
     return this.socket?.connected ?? false;
   }

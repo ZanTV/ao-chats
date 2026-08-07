@@ -107,6 +107,10 @@ export const sendMessageSchema = z.object({
   tempId: z.string().max(64).optional(),
 });
 
+export const editMessageSchema = z.object({
+  content: z.string().min(1).max(5000),
+});
+
 export const reactMessageSchema = z.object({
   emoji: z.string().min(1).max(10),
 });

@@ -30,6 +30,7 @@ import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useNotificationStore } from '../../src/stores/notificationStore';
 import { useChatComposerStore } from '../../src/stores/chatComposerStore';
+import { useTypingStore } from '../../src/stores/typingStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
 import { cacheManager, MESSAGE_PAGE_SIZE } from '../../src/cache';
@@ -86,7 +87,12 @@ export default function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const [conversation, setConversation] = useState<ConversationInfo | null>(null);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [editText, setEditText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const isOtherTyping = useTypingStore((s) =>
+    conversationId ? s.isTyping(conversationId) : false
+  );
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [pinnedMessages, setPinnedMessages] = useState<Message[]>([]);
   const [pinnedEntries, setPinnedEntries] = useState<PinnedEntry[]>([]);
@@ -138,6 +144,7 @@ export default function ChatScreen() {
       reply: t.chat.reply,
       react: t.chat.react,
       forward: t.chat.forward,
+      edit: t.chat.edit,
       pin: selectedId && pinnedIds.has(selectedId) ? t.chat.unpin : t.chat.pin,
       copy: t.chat.copy,
       star: selectedMsg?.isStarred ? t.chat.unstar : t.chat.star,
@@ -413,7 +420,7 @@ export default function ChatScreen() {
           setTimeout(() => scrollToLatest(true), 80);
         }
       })),
-      socketService.on('message:reply', (data: unknown) => {
+      socketService.on('message:reply', dedupeSocketHandler((data: unknown) => {
         const raw = data as Record<string, unknown> & { tempId?: string };
         const msg = normalizeMessage(raw);
         updateMessages((prev) => upsertMessage(prev, msg, raw.tempId));
@@ -424,7 +431,7 @@ export default function ChatScreen() {
         if (stickToBottomRef.current && !isJumpingRef.current) {
           setTimeout(() => scrollToLatest(true), 80);
         }
-      }),
+      })),
       socketService.on('message:error', (data: unknown) => {
         const { tempId, error } = data as { tempId?: string; error?: string };
         if (!tempId) return;
@@ -505,17 +512,23 @@ export default function ChatScreen() {
         );
       }),
       socketService.on('message:delete', (data: unknown) => {
-        const { messageId, forEveryone } = data as { messageId: string; forEveryone: boolean };
+        const { messageId, forEveryone, userId: deleterId } = data as {
+          messageId: string;
+          forEveryone: boolean;
+          userId: string;
+        };
         updateMessages((prev) => {
-          if (forEveryone) {
-            return prev.map((m) =>
-              m.id === messageId
-                ? { ...m, deletedForAll: true, content: 'This message was deleted' }
-                : m
-            );
+          if (forEveryone || deleterId === user?.id) {
+            return prev.filter((m) => m.id !== messageId);
           }
-          return prev.filter((m) => m.id !== messageId);
+          return prev;
         });
+      }),
+      socketService.on('message:edit', (data: unknown) => {
+        const updated = normalizeMessage(data as Record<string, unknown>);
+        updateMessages((prev) =>
+          prev.map((m) => (m.id === updated.id ? { ...m, ...updated, pending: false, failed: false } : m))
+        );
       }),
       socketService.on('message:pin', () => loadConversationMeta()),
       socketService.on('message:unpin', () => loadConversationMeta()),
@@ -700,12 +713,21 @@ export default function ChatScreen() {
         setInfoMessage(message);
         clearSelection();
         break;
+      case 'edit':
+        if (isOwn && !message.isEdited && message.type === 'TEXT' && !message.pending) {
+          setEditingMessage(message);
+          setEditText(message.content);
+          setReplyTo(null);
+        }
+        clearSelection();
+        break;
       case 'delete':
         Alert.alert(t.chat.delete, undefined, [
           {
             text: t.chat.deleteForMe,
             style: 'destructive',
             onPress: () => {
+              updateMessages((prev) => prev.filter((m) => m.id !== message.id));
               socketService.deleteMessage(message.id, conversationId, false);
               clearSelection();
             },
@@ -715,6 +737,7 @@ export default function ChatScreen() {
                 text: t.chat.deleteForEveryone,
                 style: 'destructive' as const,
                 onPress: () => {
+                  updateMessages((prev) => prev.filter((m) => m.id !== message.id));
                   socketService.deleteMessage(message.id, conversationId, true);
                   clearSelection();
                 },
@@ -725,6 +748,28 @@ export default function ChatScreen() {
         break;
     }
   };
+
+  const handleSaveEdit = () => {
+    if (!editingMessage || !conversationId || !editText.trim()) return;
+    const content = editText.trim();
+    updateMessages((prev) =>
+      prev.map((m) =>
+        m.id === editingMessage.id ? { ...m, content, isEdited: true, editedAt: new Date().toISOString() } : m
+      )
+    );
+    socketService.editMessage(editingMessage.id, conversationId, content);
+    setEditingMessage(null);
+    setEditText('');
+  };
+
+  const primarySelected = getPrimarySelected();
+  const hiddenActions: MessageAction[] = [];
+  if (primarySelected) {
+    const isOwnSelected = primarySelected.senderId === user?.id;
+    if (!isOwnSelected || primarySelected.isEdited || primarySelected.type !== 'TEXT' || primarySelected.pending) {
+      hiddenActions.push('edit');
+    }
+  }
 
   const firstUnreadIndex = useMemo(() => {
     if (!lastReadAt || !user?.id) return -1;
@@ -851,6 +896,8 @@ export default function ChatScreen() {
           compactBottom={compactBottom}
           seeMoreLabel={t.chat.seeMore}
           seeLessLabel={t.chat.seeLess}
+          editedLabel={t.chat.edited}
+          pressHighlight={colors.pressHighlight}
         />
       </View>
     );
@@ -872,7 +919,7 @@ export default function ChatScreen() {
               <Text style={{ color: colors.textSecondary, fontSize: fonts.xs }}>
                 {otherUser.isSystemAccount
                   ? otherUser.statusMessage || 'Official AO Chats Support'
-                  : isTyping ? t.chat.typing : otherUser.status === 'ONLINE' ? t.chat.online : t.chat.offline}
+                  : isOtherTyping || isTyping ? t.chat.typing : otherUser.status === 'ONLINE' ? t.chat.online : t.chat.offline}
               </Text>
             </View>
           </>
@@ -890,6 +937,7 @@ export default function ChatScreen() {
         labels={actionLabels}
         onAction={handleAction}
         onClose={clearSelection}
+        hiddenActions={hiddenActions}
         colors={colors}
         fonts={fonts}
       />
@@ -993,7 +1041,19 @@ export default function ChatScreen() {
         </View>
       )}
 
-      {replyTo && (
+      {editingMessage && (
+        <View style={[styles.editBar, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+          <Ionicons name="create-outline" size={18} color={colors.primary} />
+          <Text style={{ color: colors.textSecondary, fontSize: fonts.sm, flex: 1 }} numberOfLines={1}>
+            {t.chat.editMessage}
+          </Text>
+          <TouchableOpacity onPress={() => { setEditingMessage(null); setEditText(''); }} hitSlop={8}>
+            <Text style={{ color: colors.danger, fontSize: fonts.sm, fontWeight: '600' }}>{t.chat.cancelEdit}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {replyTo && !editingMessage && (
         <ReplyPreviewBar
           replyTo={replyTo}
           senderName={
@@ -1013,21 +1073,39 @@ export default function ChatScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.inputBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
           <TextInput
-            style={[styles.textInput, { backgroundColor: colors.inputBackground, color: colors.text, fontSize: fonts.md }]}
-            placeholder={t.chat.typeMessage}
+            style={[
+              styles.textInput,
+              {
+                backgroundColor: colors.inputBackground,
+                color: colors.text,
+                fontSize: fonts.md,
+                borderColor: colors.inputBorder,
+              },
+            ]}
+            placeholder={editingMessage ? t.chat.editMessage : t.chat.typeMessage}
             placeholderTextColor={colors.textTertiary}
-            value={inputText}
-            onChangeText={handleTyping}
+            value={editingMessage ? editText : inputText}
+            onChangeText={editingMessage ? setEditText : handleTyping}
             multiline
             maxLength={5000}
           />
-          <TouchableOpacity
-            style={[styles.sendButton, { backgroundColor: inputText.trim() ? colors.primary : colors.border }]}
-            onPress={handleSend}
-            disabled={!inputText.trim()}
-          >
-            <Ionicons name="send" size={20} color="#FFF" />
-          </TouchableOpacity>
+          {editingMessage ? (
+            <TouchableOpacity
+              style={[styles.sendButton, { backgroundColor: editText.trim() ? colors.primary : colors.border }]}
+              onPress={handleSaveEdit}
+              disabled={!editText.trim()}
+            >
+              <Ionicons name="checkmark" size={22} color="#FFF" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.sendButton, { backgroundColor: inputText.trim() ? colors.primary : colors.border }]}
+              onPress={handleSend}
+              disabled={!inputText.trim()}
+            >
+              <Ionicons name="send" size={20} color="#FFF" />
+            </TouchableOpacity>
+          )}
         </View>
       </KeyboardAvoidingView>
 
@@ -1049,7 +1127,7 @@ export default function ChatScreen() {
         deletedLabel={t.chat.deletedMessage}
         onClose={() => setShowPinnedHistory(false)}
         onJumpToMessage={scrollToMessage}
-        colors={colors}
+        colors={{ ...colors, pressHighlight: colors.pressHighlight }}
         fonts={fonts}
       />
 
@@ -1133,6 +1211,16 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm + 2,
     maxHeight: 120,
     minHeight: 44,
+    borderWidth: 1,
+    textAlignVertical: 'top',
+  },
+  editBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   sendButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
 });

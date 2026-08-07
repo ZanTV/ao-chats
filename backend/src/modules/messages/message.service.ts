@@ -287,6 +287,21 @@ export class MessageService {
   async deleteMessage(messageId: string, userId: string, forEveryone: boolean) {
     const message = await prisma.message.findUnique({ where: { id: messageId } });
     if (!message) throw new AppError(404, 'Message not found');
+    if (message.deletedForAll || message.deletedFor.includes(userId)) {
+      return { message: 'Message already deleted' };
+    }
+
+    await prisma.messageTrash.create({
+      data: {
+        messageId: message.id,
+        conversationId: message.conversationId,
+        senderId: message.senderId,
+        content: message.content,
+        type: message.type,
+        deletedById: userId,
+        forEveryone,
+      },
+    });
 
     if (forEveryone) {
       if (message.senderId !== userId) throw new AppError(403, 'Can only delete own messages for everyone');
@@ -295,7 +310,7 @@ export class MessageService {
 
       await prisma.message.update({
         where: { id: messageId },
-        data: { isDeleted: true, deletedForAll: true, content: 'This message was deleted' },
+        data: { isDeleted: true, deletedForAll: true },
       });
     } else {
       await prisma.message.update({
@@ -311,7 +326,49 @@ export class MessageService {
 
     await cacheDel(CacheKeys.messages(message.conversationId));
     await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
-    return { message: 'Message deleted' };
+    await cacheDel(CacheKeys.userConversations(userId));
+    return { message: 'Message deleted', conversationId: message.conversationId };
+  }
+
+  async editMessage(messageId: string, userId: string, content: string) {
+    const message = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!message) throw new AppError(404, 'Message not found');
+    if (message.senderId !== userId) throw new AppError(403, 'Can only edit own messages');
+    if (message.isEdited) throw new AppError(400, 'Message can only be edited once');
+    if (message.deletedForAll || message.isDeleted) throw new AppError(400, 'Cannot edit deleted message');
+    if (message.type !== 'TEXT') throw new AppError(400, 'Only text messages can be edited');
+
+    const trimmed = sanitizeInput(content).trim();
+    if (!trimmed) throw new AppError(400, 'Message cannot be empty');
+
+    const updated = await prisma.message.update({
+      where: { id: messageId },
+      data: {
+        content: trimmed,
+        isEdited: true,
+        editedAt: new Date(),
+      },
+      include: messageListInclude(userId),
+    });
+
+    await cacheDel(CacheKeys.messages(message.conversationId));
+    await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
+    return updated;
+  }
+
+  async getLastVisibleMessage(conversationId: string, userId: string) {
+    return prisma.message.findFirst({
+      where: {
+        conversationId,
+        deletedForAll: false,
+        NOT: { deletedFor: { has: userId } },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        sender: { select: { id: true, firstName: true } },
+        reactions: { select: { emoji: true }, take: 1 },
+      },
+    });
   }
 
   async forwardMessage(messageId: string, userId: string, targetConversationId: string) {

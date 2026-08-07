@@ -12,6 +12,7 @@ export type MessageAction =
   | 'copy'
   | 'star'
   | 'info'
+  | 'edit'
   | 'delete';
 
 interface ActionItem {
@@ -36,6 +37,7 @@ interface Props {
     border: string;
   };
   fonts: { xs: number; sm: number };
+  hiddenActions?: MessageAction[];
 }
 
 const ACTIONS: ActionItem[] = [
@@ -46,6 +48,7 @@ const ACTIONS: ActionItem[] = [
   { key: 'copy', icon: 'copy-outline', label: 'copy' },
   { key: 'star', icon: 'star-outline', label: 'star' },
   { key: 'info', icon: 'information-circle-outline', label: 'info' },
+  { key: 'edit', icon: 'create-outline', label: 'edit' },
   { key: 'delete', icon: 'trash-outline', label: 'delete', destructive: true },
 ];
 
@@ -57,8 +60,11 @@ export function MessageActionBar({
   onClose,
   colors,
   fonts,
+  hiddenActions = [],
 }: Props) {
   if (!visible) return null;
+
+  const visibleActions = ACTIONS.filter((action) => !hiddenActions.includes(action.key));
 
   return (
     <Animated.View
@@ -66,7 +72,7 @@ export function MessageActionBar({
       exiting={FadeOutUp.duration(180)}
       style={[styles.container, { borderColor: colors.border }]}
     >
-      <View style={[styles.glass, { backgroundColor: Platform.OS === 'web' ? colors.surface : 'rgba(255,255,255,0.92)' }]}>
+      <View style={[styles.glass, { backgroundColor: colors.surface }]}>
         <View style={styles.topRow}>
           <Text style={[styles.counter, { color: colors.text, fontSize: fonts.sm }]}>
             {selectedCount} selected
@@ -76,7 +82,7 @@ export function MessageActionBar({
           </TouchableOpacity>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actions}>
-          {ACTIONS.map((action) => (
+          {visibleActions.map((action) => (
             <TouchableOpacity
               key={action.key}
               style={[styles.actionBtn, { backgroundColor: colors.primary + '10' }]}

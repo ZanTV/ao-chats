@@ -68,13 +68,6 @@ export async function createAndDispatchMessage(
       tempId,
     });
 
-    if (replyToId) {
-      io.to(`conversation:${conversationId}`).emit('message:reply', {
-        ...message,
-        tempId,
-      });
-    }
-
     emitMessageStatus(io, conversationId, {
       messageId: message.id,
       status: message.status,

@@ -21,6 +21,59 @@ interface JwtPayload {
 
 const typingUsers = new Map<string, Set<string>>();
 
+async function broadcastTypingEvent(
+  io: Server,
+  socket: Socket,
+  conversationId: string,
+  userId: string,
+  event: 'typing:start' | 'typing:stop'
+) {
+  const payload = { conversationId, userId };
+  socket.to(`conversation:${conversationId}`).emit(event, payload);
+
+  const participants = await prisma.participant.findMany({
+    where: { conversationId },
+    select: { userId: true },
+  });
+  for (const { userId: participantId } of participants) {
+    if (participantId !== userId) {
+      io.to(`user:${participantId}`).emit(event, payload);
+    }
+  }
+}
+
+async function refreshConversationPreviews(io: Server, conversationId: string) {
+  const participants = await prisma.participant.findMany({
+    where: { conversationId },
+    select: { userId: true },
+  });
+  for (const { userId: participantId } of participants) {
+    const lastMessage = await messageService.getLastVisibleMessage(conversationId, participantId);
+    await emitConversationUpdated(io, conversationId, lastMessage ?? undefined, {
+      targetUserId: participantId,
+    });
+  }
+}
+
+async function maybeRefreshLastMessageStatus(
+  io: Server,
+  conversationId: string,
+  messageId: string
+) {
+  const participants = await prisma.participant.findMany({
+    where: { conversationId },
+    select: { userId: true },
+  });
+  for (const { userId: participantId } of participants) {
+    const lastMessage = await messageService.getLastVisibleMessage(conversationId, participantId);
+    if (lastMessage?.id === messageId) {
+      await emitConversationUpdated(io, conversationId, lastMessage, {
+        targetUserId: participantId,
+      });
+    }
+  }
+}
+
 export function setupSocketIO(httpServer: HttpServer): Server {
   const corsOrigins = parseCorsOrigins();
 
@@ -160,6 +213,8 @@ export function setupSocketIO(httpServer: HttpServer): Server {
         readerId: userId,
         unreadCount: 0,
       });
+
+      await refreshConversationPreviews(io, data.conversationId);
     });
 
     socket.on('message:delivered', async (data: { messageId: string; conversationId: string }) => {
@@ -169,26 +224,20 @@ export function setupSocketIO(httpServer: HttpServer): Server {
         status: 'DELIVERED',
         deliveredAt,
       });
+      await maybeRefreshLastMessageStatus(io, data.conversationId, data.messageId);
     });
 
-    socket.on('typing:start', (data: { conversationId: string }) => {
+    socket.on('typing:start', async (data: { conversationId: string }) => {
       if (!typingUsers.has(data.conversationId)) {
         typingUsers.set(data.conversationId, new Set());
       }
       typingUsers.get(data.conversationId)!.add(userId);
-
-      socket.to(`conversation:${data.conversationId}`).emit('typing:start', {
-        conversationId: data.conversationId,
-        userId,
-      });
+      await broadcastTypingEvent(io, socket, data.conversationId, userId, 'typing:start');
     });
 
-    socket.on('typing:stop', (data: { conversationId: string }) => {
+    socket.on('typing:stop', async (data: { conversationId: string }) => {
       typingUsers.get(data.conversationId)?.delete(userId);
-      socket.to(`conversation:${data.conversationId}`).emit('typing:stop', {
-        conversationId: data.conversationId,
-        userId,
-      });
+      await broadcastTypingEvent(io, socket, data.conversationId, userId, 'typing:stop');
     });
 
     socket.on('message:react', async (data: { messageId: string; emoji: string; conversationId: string }) => {
@@ -240,21 +289,26 @@ export function setupSocketIO(httpServer: HttpServer): Server {
           userId,
         });
 
-        const message = await prisma.message.findUnique({
-          where: { id: data.messageId },
-          include: { sender: { select: { firstName: true } } },
-        });
-        if (message) {
-          await emitConversationUpdated(io, data.conversationId, {
-            ...message,
-            content: 'This message was deleted',
-            isDeleted: true,
-            deletedForAll: data.forEveryone,
-          });
-        }
+        await refreshConversationPreviews(io, data.conversationId);
       } catch (err) {
         socket.emit('message:error', {
           error: err instanceof Error ? err.message : 'Failed to delete',
+        });
+      }
+    });
+
+    socket.on('message:edit', async (data: {
+      messageId: string;
+      conversationId: string;
+      content: string;
+    }) => {
+      try {
+        const updated = await messageService.editMessage(data.messageId, userId, data.content);
+        io.to(`conversation:${data.conversationId}`).emit('message:edit', updated);
+        await refreshConversationPreviews(io, data.conversationId);
+      } catch (err) {
+        socket.emit('message:error', {
+          error: err instanceof Error ? err.message : 'Failed to edit message',
         });
       }
     });

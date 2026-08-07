@@ -13,6 +13,9 @@ export async function emitConversationUpdated(
     type: string;
     createdAt: Date | string;
     readAt?: Date | string | null;
+    deliveredAt?: Date | string | null;
+    status?: string;
+    isEdited?: boolean;
     isDeleted?: boolean;
     deletedForAll?: boolean;
     sender?: { firstName: string };
@@ -22,6 +25,7 @@ export async function emitConversationUpdated(
     reactorId?: string;
     readerId?: string;
     unreadCount?: number;
+    targetUserId?: string;
   }
 ) {
   const participants = await prisma.participant.findMany({
@@ -30,8 +34,11 @@ export async function emitConversationUpdated(
   });
 
   const updatedAt = new Date().toISOString();
+  const targets = options?.targetUserId
+    ? participants.filter((p) => p.userId === options.targetUserId)
+    : participants;
 
-  for (const { userId } of participants) {
+  for (const { userId } of targets) {
     await cacheDel(CacheKeys.userConversations(userId));
 
     let payloadLastMessage: Record<string, unknown> | undefined;
@@ -72,6 +79,18 @@ export async function emitConversationUpdated(
         type: lastMessage.type,
         createdAt,
         isRead: !!lastMessage.readAt,
+        status: lastMessage.status,
+        deliveredAt: lastMessage.deliveredAt
+          ? typeof lastMessage.deliveredAt === 'string'
+            ? lastMessage.deliveredAt
+            : lastMessage.deliveredAt.toISOString()
+          : undefined,
+        readAt: lastMessage.readAt
+          ? typeof lastMessage.readAt === 'string'
+            ? lastMessage.readAt
+            : lastMessage.readAt.toISOString()
+          : undefined,
+        isEdited: lastMessage.isEdited,
       };
     }
 

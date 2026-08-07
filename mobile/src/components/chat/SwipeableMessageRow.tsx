@@ -51,11 +51,24 @@ interface Props {
   compactBottom?: boolean;
   seeMoreLabel?: string;
   seeLessLabel?: string;
+  editedLabel?: string;
+  pressHighlight?: string;
 }
 
 function MessageRowContent(props: Props) {
+  const highlight = props.pressHighlight || props.colors.primary + '12';
+
   return (
-    <Pressable onPress={props.onPress} onLongPress={props.onLongPress} delayLongPress={280}>
+    <Pressable
+      onPress={props.onPress}
+      onLongPress={props.onLongPress}
+      delayLongPress={280}
+      style={({ pressed, hovered }) => [
+        styles.pressWrap,
+        pressed && { backgroundColor: highlight },
+        Platform.OS === 'web' && hovered && { backgroundColor: highlight },
+      ]}
+    >
       <MessageBubble
         message={props.message}
         isOwn={props.isOwn}
@@ -72,6 +85,7 @@ function MessageRowContent(props: Props) {
         compactBottom={props.compactBottom}
         seeMoreLabel={props.seeMoreLabel}
         seeLessLabel={props.seeLessLabel}
+        editedLabel={props.editedLabel}
       />
     </Pressable>
   );
@@ -135,6 +149,7 @@ export function SwipeableMessageRow(props: Props) {
 }
 
 const styles = StyleSheet.create({
+  pressWrap: { borderRadius: 16 },
   row: { marginBottom: Spacing.sm, position: 'relative' },
   rowCompact: { marginBottom: Spacing.xs },
   replyHint: {

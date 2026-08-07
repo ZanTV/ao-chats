@@ -12,7 +12,7 @@ import { useNotificationStore } from '../src/stores/notificationStore';
 import { LoadingScreen } from '../src/components/LoadingScreen';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { NotificationPanel } from '../src/components/NotificationPanel';
-import { hydrateLocalCache } from '../src/cache';
+import { GlobalRealtimeListeners } from '../src/components/GlobalRealtimeListeners';
 import { initializePushNotifications, unregisterPushNotifications } from '../src/services/pushService';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -96,6 +96,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
           <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
+          <GlobalRealtimeListeners />
           <NotificationPanel />
           <AuthGuard>
             <Stack screenOptions={{ headerShown: false }}>

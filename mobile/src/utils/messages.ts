@@ -26,6 +26,8 @@ export interface ChatMessage {
   isStarred?: boolean;
   pending?: boolean;
   failed?: boolean;
+  isEdited?: boolean;
+  editedAt?: string;
 }
 
 /** Remove duplicate messages by id — keeps the last occurrence */
@@ -49,6 +51,18 @@ export function upsertMessage(
   const merged: ChatMessage = { ...incoming, pending: false, failed: false };
 
   let next = list.filter((m) => m.id !== tempId);
+
+  next = next.filter((m) => {
+    if (m.id === merged.id) return false;
+    if (
+      m.senderId === merged.senderId &&
+      m.content === merged.content &&
+      Math.abs(new Date(m.createdAt).getTime() - new Date(merged.createdAt).getTime()) < 8000
+    ) {
+      return m.pending || m.id.startsWith('temp-');
+    }
+    return true;
+  });
 
   next = next.filter(
     (m) =>
@@ -89,5 +103,9 @@ export function normalizeMessage(raw: Record<string, unknown>): ChatMessage {
     isForwarded: Boolean(raw.isForwarded),
     forwardedFromId: raw.forwardedFromId as string | undefined,
     isStarred: Boolean(raw.isStarred) || (stars?.length ?? 0) > 0,
+    pending: Boolean(raw.pending),
+    failed: Boolean(raw.failed),
+    isEdited: Boolean(raw.isEdited),
+    editedAt: raw.editedAt ? String(raw.editedAt) : undefined,
   };
 }

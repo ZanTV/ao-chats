@@ -50,6 +50,7 @@ interface Props {
   compactBottom?: boolean;
   seeMoreLabel?: string;
   seeLessLabel?: string;
+  editedLabel?: string;
 }
 
 export function MessageBubble({
@@ -68,12 +69,13 @@ export function MessageBubble({
   compactBottom = false,
   seeMoreLabel = 'See more',
   seeLessLabel = 'See less',
+  editedLabel = 'edited',
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const highlight = useSharedValue(0);
 
-  const displayContent = message.deletedForAll ? deletedLabel : message.content;
-  const isLongMessage = !message.deletedForAll && message.content.length > 220;
+  const displayContent = message.content;
+  const isLongMessage = message.content.length > 220;
   const isCollapsed = isLongMessage && !expanded;
 
   useEffect(() => {
@@ -175,6 +177,11 @@ export function MessageBubble({
           <Text style={[styles.time, { color: isOwn ? 'rgba(255,255,255,0.72)' : colors.textTertiary, fontSize: fonts.xs }]}>
             {formatTime(message.createdAt)}
           </Text>
+          {message.isEdited && (
+            <Text style={[styles.editedLabel, { color: isOwn ? 'rgba(255,255,255,0.65)' : colors.textTertiary, fontSize: fonts.xs }]}>
+              · {editedLabel}
+            </Text>
+          )}
           {status && (
             <View style={styles.statusWrap}>
               <AoMessageStatus status={status} readColor="#93C5FD" />
@@ -230,6 +237,7 @@ const styles = StyleSheet.create({
   seeMoreText: { fontWeight: '700' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4, gap: 2 },
   time: {},
+  editedLabel: { fontStyle: 'italic', marginLeft: 2 },
   statusWrap: { marginLeft: 4 },
   reactionsBar: {
     flexDirection: 'row',

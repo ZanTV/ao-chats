@@ -81,8 +81,17 @@ export function getConversationListPreview(
   draft: string | undefined,
   pendingMessages: Array<{ content: string; pending?: boolean; failed?: boolean }> | undefined,
   currentUserId: string,
-  labels: { you: string; draft: string; sending: string; failed: string; fallback: string }
+  labels: { you: string; draft: string; sending: string; failed: string; fallback: string; typing: string },
+  isTyping?: boolean
 ): ConversationPreviewMeta {
+  if (isTyping) {
+    return {
+      text: labels.typing,
+      isDraft: false,
+      isPending: false,
+    };
+  }
+
   const pending = pendingMessages?.find((m) => m.pending || m.failed);
   if (pending) {
     const statusLabel = pending.failed ? labels.failed : labels.sending;
@@ -106,4 +115,21 @@ export function getConversationListPreview(
     isDraft: false,
     isPending: false,
   };
+}
+
+export function getListMessageStatus(
+  lastMessage: {
+    senderId: string;
+    status?: string;
+    readAt?: string;
+    deliveredAt?: string;
+    waitingAt?: string;
+  } | null,
+  currentUserId: string
+): 'sent' | 'waiting' | 'delivered' | 'read' | null {
+  if (!lastMessage || lastMessage.senderId !== currentUserId) return null;
+  if (lastMessage.readAt || lastMessage.status === 'READ') return 'read';
+  if (lastMessage.deliveredAt || lastMessage.status === 'DELIVERED') return 'delivered';
+  if (lastMessage.status === 'WAITING' || lastMessage.waitingAt) return 'waiting';
+  return 'sent';
 }

@@ -19,11 +19,14 @@ import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
 import { cacheManager, CacheDomain } from '../../src/cache';
 import { NotificationBell } from '../../src/components/NotificationPanel';
+import { AoMessageStatus } from '../../src/components/chat/AoMessageStatus';
 import {
   formatConversationTime,
   getConversationListPreview,
+  getListMessageStatus,
   sortConversations,
 } from '../../src/utils/conversation';
+import { useTypingStore } from '../../src/stores/typingStore';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 interface Conversation {
@@ -46,6 +49,11 @@ interface Conversation {
     type?: string;
     createdAt: string;
     isRead: boolean;
+    status?: string;
+    deliveredAt?: string;
+    readAt?: string;
+    waitingAt?: string;
+    isEdited?: boolean;
   } | null;
   updatedAt: string;
   unreadCount: number;
@@ -62,6 +70,7 @@ export default function HomeScreen() {
   const { user } = useAuthStore();
   const { colors, fonts, t, language } = useSettingsStore();
   const { drafts, pendingByConversation, loadAll } = useChatComposerStore();
+  const typingConversations = useTypingStore((s) => s.typingConversations);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -138,17 +147,41 @@ export default function HomeScreen() {
     const unsubUpdate = socketService.on('conversation:update', (data: unknown) => {
       applyConversationUpdate(data as ConversationUpdatePayload);
     });
-    const unsub2 = socketService.on('message:new', (data: unknown) => {
+    const unsubNew = socketService.on('message:new', (data: unknown) => {
       const payload = data as { conversationId?: string };
       if (payload.conversationId) {
         applyConversationUpdate({ conversationId: payload.conversationId });
       }
     });
 
+    const unsubStatus = socketService.on('message:status', (data: unknown) => {
+      const payload = data as {
+        messageId: string;
+        status: string;
+        deliveredAt?: string;
+        readAt?: string;
+      };
+      setConversations((prev) =>
+        prev.map((c) => {
+          if (c.lastMessage?.id !== payload.messageId) return c;
+          return {
+            ...c,
+            lastMessage: {
+              ...c.lastMessage!,
+              status: payload.status,
+              deliveredAt: payload.deliveredAt || c.lastMessage!.deliveredAt,
+              readAt: payload.readAt || c.lastMessage!.readAt,
+            },
+          };
+        })
+      );
+    });
+
     return () => {
       unsub1();
       unsubUpdate();
-      unsub2();
+      unsubNew();
+      unsubStatus();
     };
   }, [loadConversations, applyConversationUpdate]);
 
@@ -173,15 +206,21 @@ export default function HomeScreen() {
         sending: t.home.sending,
         failed: t.home.sendFailed,
         fallback: t.home.startChat,
-      }
+        typing: t.chat.typing,
+      },
+      typingConversations[item.id]
     );
+    const listStatus = getListMessageStatus(item.lastMessage, user?.id || '');
     const timeSource = item.lastMessage?.createdAt || item.updatedAt;
+    const isTypingPreview = typingConversations[item.id];
     const previewColor =
-      previewMeta.isDraft || previewMeta.isPending
-        ? colors.draftText
-        : item.unreadCount > 0
-          ? colors.text
-          : colors.textSecondary;
+      isTypingPreview
+        ? colors.primary
+        : previewMeta.isDraft || previewMeta.isPending
+          ? colors.draftText
+          : item.unreadCount > 0
+            ? colors.text
+            : colors.textSecondary;
 
     return (
       <TouchableOpacity
@@ -221,14 +260,22 @@ export default function HomeScreen() {
                 {
                   color: previewColor,
                   fontSize: fonts.sm,
-                  fontStyle: previewMeta.isDraft || previewMeta.isPending ? 'italic' : 'normal',
+                  fontStyle: previewMeta.isDraft || previewMeta.isPending || isTypingPreview ? 'italic' : 'normal',
                 },
-                item.unreadCount > 0 && !previewMeta.isDraft && !previewMeta.isPending && { fontWeight: '600' },
+                item.unreadCount > 0 && !previewMeta.isDraft && !previewMeta.isPending && !isTypingPreview && { fontWeight: '600' },
               ]}
               numberOfLines={1}
             >
               {previewMeta.text}
             </Text>
+            {listStatus && !isTypingPreview && !previewMeta.isDraft && !previewMeta.isPending && (
+              <AoMessageStatus
+                status={listStatus}
+                color={colors.textTertiary}
+                readColor={colors.primary}
+                size={13}
+              />
+            )}
             {item.isPinned && (
               <Ionicons name="pin" size={14} color={colors.primary} style={{ marginLeft: 4 }} />
             )}
@@ -347,7 +394,7 @@ const styles = StyleSheet.create({
   officialTag: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: BorderRadius.full },
   officialText: { fontWeight: '600' },
   chatTime: { flexShrink: 0 },
-  chatFooter: { flexDirection: 'row', alignItems: 'center' },
+  chatFooter: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   chatPreview: { flex: 1 },
   badge: {
     minWidth: 20,

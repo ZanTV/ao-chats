@@ -284,6 +284,11 @@ class ApiClient {
     });
   deleteMessage = (messageId: string, forEveryone: boolean) =>
     this.request(`/messages/${messageId}?forEveryone=${forEveryone}`, { method: 'DELETE' });
+  editMessage = (messageId: string, content: string) =>
+    this.request(`/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    });
   pinMessage = (conversationId: string, messageId: string) =>
     this.request(`/messages/${conversationId}/pin`, {
       method: 'POST',

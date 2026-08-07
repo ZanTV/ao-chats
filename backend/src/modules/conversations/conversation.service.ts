@@ -163,6 +163,10 @@ export class ConversationService {
               type: lastMessage.type,
               createdAt: lastMessage.createdAt.toISOString(),
               isRead: !!lastMessage.readAt,
+              status: lastMessage.status,
+              deliveredAt: lastMessage.deliveredAt?.toISOString(),
+              readAt: lastMessage.readAt?.toISOString(),
+              isEdited: lastMessage.isEdited,
             }
           : null,
         updatedAt: p.conversation.updatedAt.toISOString(),

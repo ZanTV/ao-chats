@@ -7,6 +7,7 @@ import {
   reactMessageSchema,
   forwardMessageSchema,
   pinMessageSchema,
+  editMessageSchema,
 } from '../auth/auth.validation';
 import { validateBody } from '../../middleware/validation';
 import { authenticate, AuthRequest } from '../../middleware/auth';
@@ -151,6 +152,20 @@ router.delete(
       forEveryone
     );
     res.json(result);
+  })
+);
+
+router.patch(
+  '/:messageId',
+  validateBody(editMessageSchema),
+  asyncHandler(async (req: AuthRequest, res) => {
+    const messageId = paramId(req.params.messageId);
+    const updated = await messageService.editMessage(messageId, req.userId!, req.body.content);
+    const io = getIO();
+    if (io) {
+      io.to(`conversation:${updated.conversationId}`).emit('message:edit', updated);
+    }
+    res.json({ message: updated });
   })
 );
 

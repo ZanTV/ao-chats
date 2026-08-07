@@ -7,6 +7,7 @@ import {
   FlatList,
   StyleSheet,
   Pressable,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ChatMessage } from '../../utils/messages';
@@ -36,6 +37,7 @@ interface Props {
     textTertiary: string;
     border: string;
     primary: string;
+    pressHighlight?: string;
   };
   fonts: { xs: number; sm: number; md: number };
 }
@@ -50,6 +52,7 @@ export function PinnedHistorySheet({
   colors,
   fonts,
 }: Props) {
+  const highlight = colors.pressHighlight || colors.primary + '12';
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString(undefined, {
       month: 'short',
@@ -81,13 +84,16 @@ export function PinnedHistorySheet({
               const preview = getReplyPreviewText(item.message, deletedLabel);
               const sender = item.senderName || item.pinnedByName || 'Pinned';
               return (
-                <TouchableOpacity
-                  style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                <Pressable
+                  style={({ pressed, hovered }) => [
+                    styles.row,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
+                    (pressed || (Platform.OS === 'web' && hovered)) && { backgroundColor: highlight },
+                  ]}
                   onPress={() => {
                     onJumpToMessage(item.messageId);
                     onClose();
                   }}
-                  activeOpacity={0.75}
                 >
                   <View style={[styles.accent, { backgroundColor: colors.primary }]} />
                   <View style={styles.rowBody}>
@@ -102,7 +108,7 @@ export function PinnedHistorySheet({
                     </Text>
                   </View>
                   <Ionicons name="arrow-down-circle-outline" size={20} color={colors.textTertiary} />
-                </TouchableOpacity>
+                </Pressable>
               );
             }}
             ListEmptyComponent={

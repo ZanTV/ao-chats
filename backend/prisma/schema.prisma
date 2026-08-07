@@ -189,6 +189,8 @@ model Message {
   waitingAt      DateTime?     @map("waiting_at")
   isForwarded    Boolean       @default(false) @map("is_forwarded")
   forwardedFromId String?      @map("forwarded_from_id")
+  isEdited       Boolean       @default(false) @map("is_edited")
+  editedAt       DateTime?     @map("edited_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
@@ -203,6 +205,23 @@ model Message {
   @@index([conversationId, createdAt])
   @@index([senderId])
   @@map("messages")
+}
+
+model MessageTrash {
+  id             String      @id @default(uuid())
+  messageId      String      @map("message_id")
+  conversationId String      @map("conversation_id")
+  senderId       String      @map("sender_id")
+  content        String
+  type           MessageType @default(TEXT)
+  deletedById    String      @map("deleted_by_id")
+  forEveryone    Boolean     @default(false) @map("for_everyone")
+  deletedAt      DateTime    @default(now()) @map("deleted_at")
+
+  @@index([messageId])
+  @@index([conversationId])
+  @@index([deletedById])
+  @@map("message_trash")
 }
 
 model MessageReaction {

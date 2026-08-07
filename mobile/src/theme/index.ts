@@ -25,6 +25,8 @@ export const Colors = {
     tabBar: '#FFFFFF',
     headerBackground: '#FFFFFF',
     draftText: '#6366F1',
+    pressHighlight: 'rgba(37, 99, 235, 0.10)',
+    inputBorder: '#D1D5DB',
   },
   dark: {
     background: '#0F172A',
@@ -52,6 +54,8 @@ export const Colors = {
     tabBar: '#1E293B',
     headerBackground: '#1E293B',
     draftText: '#A5B4FC',
+    pressHighlight: 'rgba(96, 165, 250, 0.14)',
+    inputBorder: '#475569',
   },
 };
 

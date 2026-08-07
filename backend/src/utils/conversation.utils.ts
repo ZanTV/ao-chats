@@ -14,7 +14,7 @@ export function formatMessagePreview(
   const prefix = message.senderId === currentUserId ? 'You' : (senderName || 'Someone');
 
   if (message.deletedForAll || message.isDeleted) {
-    return `${prefix}: This message was deleted`;
+    return '';
   }
 
   switch (message.type) {
