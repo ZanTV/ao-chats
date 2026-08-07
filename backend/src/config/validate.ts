@@ -28,6 +28,12 @@ const DEVELOPMENT_REQUIRED = ['DATABASE_URL'] as const;
 const DEFAULT_JWT_SECRET = 'your-super-secret-jwt-key-change-in-production';
 const DEFAULT_DEV_JWT_SECRET = 'dev-secret-change-me';
 
+function hostedPlatformLabel(): string {
+  if (process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID) return 'Render';
+  if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) return 'Railway';
+  return 'Render/Railway';
+}
+
 export interface EnvValidationResult {
   valid: boolean;
   environment: string;
@@ -118,7 +124,9 @@ export function formatValidationError(result: EnvValidationResult): string {
   if (result.loadedFile) {
     lines.push(`Loaded file: ${result.loadedFile}`);
   } else if (result.environment === 'production') {
-    lines.push('Using platform-injected environment variables (Railway).');
+    lines.push(
+      `Using platform-injected environment variables (${hostedPlatformLabel()}).`
+    );
   } else {
     lines.push('No .env.development or .env file found.');
   }
@@ -142,7 +150,7 @@ export function formatValidationError(result: EnvValidationResult): string {
   return lines.join('\n');
 }
 
-export function getRailwayVariableChecklist(): { name: string; present: boolean }[] {
+export function getProductionVariableChecklist(): { name: string; present: boolean }[] {
   return PRODUCTION_REQUIRED.map((name) => {
     if (name === 'SOCKET_CORS_ORIGIN') {
       return {
@@ -158,3 +166,6 @@ export function getRailwayVariableChecklist(): { name: string; present: boolean 
     };
   });
 }
+
+/** @deprecated Use getProductionVariableChecklist */
+export const getRailwayVariableChecklist = getProductionVariableChecklist;

@@ -5,7 +5,7 @@ import {
   type EnvValidationResult,
 } from './validate';
 import { currentNodeEnv, loadedEnvFile } from './loadEnv';
-import { isRailway } from './platform';
+import { isHostedPlatform, hostedPlatformName } from './platform';
 
 const nodeEnv = currentNodeEnv;
 const isProduction = nodeEnv === 'production';
@@ -13,8 +13,10 @@ const isProduction = nodeEnv === 'production';
 const validation = validateEnvironment(nodeEnv, loadedEnvFile);
 if (!validation.valid) {
   const message = formatValidationError(validation);
-  if (isProduction && isRailway()) {
-    console.error('[AO Chats] Environment warning on Railway:\n' + message);
+  if (isProduction && isHostedPlatform()) {
+    console.error(
+      `[AO Chats] Environment warning on ${hostedPlatformName()}:\n` + message
+    );
   } else {
     throw new Error(message);
   }

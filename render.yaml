@@ -1,0 +1,16 @@
+# AO Chats — Render blueprint
+# Dashboard: New → Blueprint → connect repo, or Render auto-detects this file.
+
+services:
+  - type: web
+    name: ao-chats-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: node scripts/start-prod.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Add secrets in Render Dashboard → Environment (paste backend/.env.production):
+      # DATABASE_URL, REDIS_URL, JWT_SECRET, JWT_REFRESH_SECRET, SMTP_*, CLIENT_URL, etc.

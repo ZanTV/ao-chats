@@ -9,7 +9,7 @@ process.chdir(root);
 await import('./prepare-env.mjs');
 
 console.log('Checking production environment…');
-const preflight = spawn('node', ['scripts/railway-preflight.mjs'], {
+const preflight = spawn('node', ['scripts/production-preflight.mjs'], {
   stdio: 'inherit',
   env: process.env,
 });

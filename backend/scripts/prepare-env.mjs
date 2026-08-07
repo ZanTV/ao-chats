@@ -1,6 +1,6 @@
 /**
  * Ensures Prisma env vars exist before `prisma generate` / `db push`.
- * Railway build may run before runtime secrets are injected — use a placeholder
+ * Render/Railway build may run before runtime secrets are injected — use a placeholder
  * so schema validation passes; runtime uses real DATABASE_URL from the platform.
  */
 const dbUrl = process.env.DATABASE_URL?.trim();
@@ -11,6 +11,6 @@ if (!process.env.DATABASE_URL_UNPOOLED?.trim()) {
 
 if (!dbUrl && process.env.NODE_ENV === 'production') {
   console.warn(
-    'DATABASE_URL not set yet — using placeholder for Prisma CLI (set DATABASE_URL on Railway).'
+    'DATABASE_URL not set yet — using placeholder for Prisma CLI (set DATABASE_URL on Render).'
   );
 }

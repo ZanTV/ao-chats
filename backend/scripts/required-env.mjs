@@ -61,8 +61,8 @@ export function checkProductionEnv() {
 }
 
 export function formatPreflightError(result) {
-  const lines = ['Railway production env check failed.'];
-  lines.push('Set these in Railway Dashboard → your service → Variables → Raw Editor:');
+  const lines = ['Production environment check failed.'];
+  lines.push('Set these in Render Dashboard → Web Service → Environment (or paste from backend/.env.production):');
   lines.push('');
 
   if (result.missing.length) {
@@ -78,6 +78,6 @@ export function formatPreflightError(result) {
 
   lines.push('');
   lines.push('Local reference: backend/.env.production');
-  lines.push('Sync helper: npm run railway:sync-env (from backend/, after railway login)');
+  lines.push('Check locally: npm run render:check');
   return lines.join('\n');
 }

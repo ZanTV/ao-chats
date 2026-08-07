@@ -51,7 +51,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use('/api/auth', authLimiter);
 app.use('/api/', apiLimiter);
 
-// Railway healthcheck requires HTTP 200 while the process is alive.
+// Render/Railway healthcheck requires HTTP 200 while the process is alive.
 app.get('/health', async (_req, res) => {
   let dbOk = false;
   let dbError: string | undefined;
