@@ -5,6 +5,14 @@
 
 const LOCALHOST_PATTERN = /localhost|127\.0\.0\.1/i;
 
+/** Public production defaults — used only when EXPO_PUBLIC_* is missing from the build. */
+const PRODUCTION_URL_DEFAULTS = {
+  EXPO_PUBLIC_API_URL: 'https://api.aochats.chat/api',
+  EXPO_PUBLIC_SOCKET_URL: 'https://api.aochats.chat',
+  EXPO_PUBLIC_APP_URL: 'https://www.aochats.chat',
+  EXPO_PUBLIC_STORAGE_URL: 'https://www.aochats.chat',
+} as const;
+
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '');
 }
@@ -16,13 +24,21 @@ function missingEnv(name: string): never {
   );
 }
 
-function requirePublicEnv(name: string): string {
+function requirePublicEnv(name: keyof typeof PRODUCTION_URL_DEFAULTS): string {
   const value = process.env[name]?.trim();
-  if (!value) missingEnv(name);
-  if (isProduction() && LOCALHOST_PATTERN.test(value)) {
-    throw new Error(`${name} must not use localhost in production (got: ${value})`);
+  if (value) {
+    if (LOCALHOST_PATTERN.test(value)) {
+      throw new Error(`${name} must not use localhost in production (got: ${value})`);
+    }
+    return stripTrailingSlash(value);
   }
-  return stripTrailingSlash(value);
+
+  const fallback = PRODUCTION_URL_DEFAULTS[name];
+  if (isProduction() && fallback) {
+    return fallback;
+  }
+
+  missingEnv(name);
 }
 
 function getDevApiUrl(): string {
@@ -113,8 +129,8 @@ export function getAppName(): string {
   return process.env.EXPO_PUBLIC_APP_NAME?.trim() || 'AO Chats';
 }
 
-export const INIT_TIMEOUT_MS = 12000;
-export const API_TIMEOUT_MS = 15000;
+export const INIT_TIMEOUT_MS = 20000;
+export const API_TIMEOUT_MS = 30000;
 
 /** Wrap a promise with a timeout. Rejects if time expires (unless fallback is set). */
 export function withTimeout<T>(

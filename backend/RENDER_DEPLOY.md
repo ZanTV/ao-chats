@@ -38,8 +38,8 @@ Required:
 | `SMTP_USER` | Gmail |
 | `SMTP_PASS` | Gmail App Password |
 | `CLIENT_URL` | `https://www.aochats.chat` |
-| `CORS_ORIGIN` | `https://www.aochats.chat` |
-| `SOCKET_CORS_ORIGIN` | `https://www.aochats.chat` |
+| `CORS_ORIGIN` | `https://www.aochats.chat,https://aochats.chat` |
+| `SOCKET_CORS_ORIGIN` | `https://www.aochats.chat,https://aochats.chat` |
 
 **Do not set `PORT`** — Render injects it automatically.
 
