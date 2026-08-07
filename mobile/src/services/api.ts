@@ -259,6 +259,10 @@ class ApiClient {
     this.request(`/conversations/${id}/pin`, { method: 'PATCH' });
   markConversationRead = (id: string) =>
     this.request(`/conversations/${id}/read`, { method: 'POST' });
+  clearConversation = (id: string) =>
+    this.request<{ conversationId: string; clearedAt: string }>(`/conversations/${id}/clear`, {
+      method: 'POST',
+    });
 
   // Messages
   getMessages = (conversationId: string, cursor?: string, limit = 30) => {

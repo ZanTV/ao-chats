@@ -94,4 +94,22 @@ router.post(
   })
 );
 
+router.post(
+  '/:id/clear',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const conversationId = paramId(req.params.id);
+    const result = await conversationService.clearChat(conversationId, req.userId!);
+    const io = getIO();
+    if (io) {
+      io.to(`user:${req.userId}`).emit('conversation:cleared', result);
+      await emitConversationUpdated(io, conversationId, undefined, {
+        targetUserId: req.userId!,
+        unreadCount: 0,
+        clearLastMessage: true,
+      });
+    }
+    res.json(result);
+  })
+);
+
 export default router;

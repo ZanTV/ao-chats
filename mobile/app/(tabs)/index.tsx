@@ -63,7 +63,7 @@ interface Conversation {
 interface ConversationUpdatePayload {
   conversationId: string;
   updatedAt?: string;
-  lastMessage?: Conversation['lastMessage'];
+  lastMessage?: Conversation['lastMessage'] | null;
   unreadCount?: number;
 }
 
@@ -113,7 +113,9 @@ export default function HomeScreen() {
           updatedAt: payload.updatedAt || payload.lastMessage?.createdAt || current.updatedAt,
         };
 
-        if (payload.lastMessage) {
+        if (payload.lastMessage === null) {
+          updated.lastMessage = null;
+        } else if (payload.lastMessage) {
           updated.lastMessage = payload.lastMessage;
           if (payload.unreadCount === undefined && payload.lastMessage.senderId !== user?.id) {
             updated.unreadCount = (current.unreadCount || 0) + 1;

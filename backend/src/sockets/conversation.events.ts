@@ -26,6 +26,7 @@ export async function emitConversationUpdated(
     readerId?: string;
     unreadCount?: number;
     targetUserId?: string;
+    clearLastMessage?: boolean;
   }
 ) {
   const participants = await prisma.participant.findMany({
@@ -41,8 +42,10 @@ export async function emitConversationUpdated(
   for (const { userId } of targets) {
     await cacheDel(CacheKeys.userConversations(userId));
 
-    let payloadLastMessage: Record<string, unknown> | undefined;
-    if (lastMessage) {
+    let payloadLastMessage: Record<string, unknown> | null | undefined;
+    if (options?.clearLastMessage) {
+      payloadLastMessage = null;
+    } else if (lastMessage) {
       const createdAt =
         typeof lastMessage.createdAt === 'string'
           ? lastMessage.createdAt

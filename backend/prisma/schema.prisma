@@ -163,6 +163,7 @@ model Participant {
   userId         String    @map("user_id")
   isPinned       Boolean   @default(false) @map("is_pinned")
   lastReadAt     DateTime? @map("last_read_at")
+  clearedAt      DateTime? @map("cleared_at")
   joinedAt       DateTime  @default(now()) @map("joined_at")
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -205,23 +206,6 @@ model Message {
   @@index([conversationId, createdAt])
   @@index([senderId])
   @@map("messages")
-}
-
-model MessageTrash {
-  id             String      @id @default(uuid())
-  messageId      String      @map("message_id")
-  conversationId String      @map("conversation_id")
-  senderId       String      @map("sender_id")
-  content        String
-  type           MessageType @default(TEXT)
-  deletedById    String      @map("deleted_by_id")
-  forEveryone    Boolean     @default(false) @map("for_everyone")
-  deletedAt      DateTime    @default(now()) @map("deleted_at")
-
-  @@index([messageId])
-  @@index([conversationId])
-  @@index([deletedById])
-  @@map("message_trash")
 }
 
 model MessageReaction {

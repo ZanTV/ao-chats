@@ -102,6 +102,7 @@ export class ConversationService {
               where: {
                 deletedForAll: false,
                 NOT: { deletedFor: { has: userId } },
+                ...(p.clearedAt ? { createdAt: { gt: p.clearedAt } } : {}),
               },
               orderBy: { createdAt: 'desc' },
               take: 1,
@@ -121,7 +122,11 @@ export class ConversationService {
           where: {
             conversationId: p.conversationId,
             senderId: { not: userId },
-            createdAt: { gt: p.lastReadAt ?? new Date(0) },
+            createdAt: {
+              gt: p.clearedAt && p.lastReadAt
+                ? (p.lastReadAt > p.clearedAt ? p.lastReadAt : p.clearedAt)
+                : p.clearedAt ?? p.lastReadAt ?? new Date(0),
+            },
             deletedForAll: false,
             NOT: { deletedFor: { has: userId } },
           },
@@ -234,6 +239,10 @@ export class ConversationService {
       notificationsMarked,
       unreadCount: 0,
     };
+  }
+
+  async clearChat(conversationId: string, userId: string) {
+    return messageService.clearChatForUser(conversationId, userId);
   }
 }
 

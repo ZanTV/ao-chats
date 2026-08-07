@@ -42,6 +42,21 @@ async function getRecipientStatus(conversationId: string, senderId: string) {
   return other?.user ?? null;
 }
 
+function messageVisibilityWhere(
+  conversationId: string,
+  userId: string,
+  clearedAt?: Date | null,
+  extra?: Record<string, unknown>
+) {
+  return {
+    conversationId,
+    deletedForAll: false,
+    NOT: { deletedFor: { has: userId } },
+    ...(clearedAt ? { createdAt: { gt: clearedAt } } : {}),
+    ...extra,
+  };
+}
+
 export class MessageService {
   async sendMessage(
     conversationId: string,
@@ -130,12 +145,9 @@ export class MessageService {
     }
 
     const messages = await prisma.message.findMany({
-      where: {
-        conversationId,
-        deletedForAll: false,
-        NOT: { deletedFor: { has: userId } },
+      where: messageVisibilityWhere(conversationId, userId, participant.clearedAt, {
         ...(cursor ? { createdAt: { lt: new Date(cursor) } } : {}),
-      },
+      }),
       include: messageListInclude(userId),
       orderBy: { createdAt: 'desc' },
       take: limit + 1,
@@ -172,11 +184,7 @@ export class MessageService {
     if (!target) throw new AppError(404, 'Message not found');
 
     const half = Math.max(10, Math.floor(limit / 2));
-    const visibility = {
-      conversationId,
-      deletedForAll: false,
-      NOT: { deletedFor: { has: userId } },
-    };
+    const visibility = messageVisibilityWhere(conversationId, userId, participant.clearedAt);
 
     const [before, after] = await Promise.all([
       prisma.message.findMany({
@@ -203,12 +211,9 @@ export class MessageService {
     if (!participant) throw new AppError(403, 'Not a participant');
 
     return prisma.message.findMany({
-      where: {
-        conversationId,
+      where: messageVisibilityWhere(conversationId, userId, participant.clearedAt, {
         content: { contains: query, mode: 'insensitive' },
-        deletedForAll: false,
-        NOT: { deletedFor: { has: userId } },
-      },
+      }),
       include: {
         sender: { select: { id: true, firstName: true } },
       },
@@ -288,20 +293,8 @@ export class MessageService {
     const message = await prisma.message.findUnique({ where: { id: messageId } });
     if (!message) throw new AppError(404, 'Message not found');
     if (message.deletedForAll || message.deletedFor.includes(userId)) {
-      return { message: 'Message already deleted' };
+      return { message: 'Message already deleted', conversationId: message.conversationId };
     }
-
-    await prisma.messageTrash.create({
-      data: {
-        messageId: message.id,
-        conversationId: message.conversationId,
-        senderId: message.senderId,
-        content: message.content,
-        type: message.type,
-        deletedById: userId,
-        forEveryone,
-      },
-    });
 
     if (forEveryone) {
       if (message.senderId !== userId) throw new AppError(403, 'Can only delete own messages for everyone');
@@ -357,12 +350,13 @@ export class MessageService {
   }
 
   async getLastVisibleMessage(conversationId: string, userId: string) {
+    const participant = await prisma.participant.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+    if (!participant) return null;
+
     return prisma.message.findFirst({
-      where: {
-        conversationId,
-        deletedForAll: false,
-        NOT: { deletedFor: { has: userId } },
-      },
+      where: messageVisibilityWhere(conversationId, userId, participant.clearedAt),
       orderBy: { createdAt: 'desc' },
       include: {
         sender: { select: { id: true, firstName: true } },
@@ -535,8 +529,34 @@ export class MessageService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    const cacheVersion = await cacheSetVersioned(cacheKey, pins, CacheTTL.pins);
-    return { pins, cacheVersion };
+
+    const visiblePins = pins.filter((pin) => {
+      const msg = pin.message;
+      if (msg.deletedForAll || msg.deletedFor.includes(userId)) return false;
+      if (participant.clearedAt && msg.createdAt <= participant.clearedAt) return false;
+      return true;
+    });
+    const cacheVersion = await cacheSetVersioned(cacheKey, visiblePins, CacheTTL.pins);
+    return { pins: visiblePins, cacheVersion };
+  }
+
+  async clearChatForUser(conversationId: string, userId: string) {
+    const participant = await prisma.participant.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+    if (!participant) throw new AppError(403, 'Not a participant');
+
+    const clearedAt = new Date();
+    await prisma.participant.update({
+      where: { conversationId_userId: { conversationId, userId } },
+      data: { clearedAt, lastReadAt: clearedAt },
+    });
+
+    await cacheDel(CacheKeys.userConversations(userId));
+    await cacheInvalidatePattern(`${CacheKeys.messages(conversationId)}:*`);
+    await cacheInvalidatePattern(`${CacheKeys.pinnedMessages(conversationId)}:*`);
+
+    return { conversationId, clearedAt: clearedAt.toISOString() };
   }
 
   async markDelivered(messageId: string) {

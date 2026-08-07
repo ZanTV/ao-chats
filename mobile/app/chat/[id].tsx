@@ -526,10 +526,22 @@ export default function ChatScreen() {
         if (userId !== user?.id) setIsTyping(true);
       }),
       socketService.on('typing:stop', () => setIsTyping(false)),
+      socketService.on('conversation:cleared', (data: unknown) => {
+        const { conversationId: clearedId } = data as { conversationId?: string };
+        if (clearedId !== conversationId) return;
+        applyMessages([]);
+        setPinnedMessages([]);
+        setPinnedIds(new Set());
+        setPinnedEntries([]);
+        setShowUnreadDivider(false);
+        if (conversationId) {
+          cacheManager.clearConversationMessages(conversationId).catch(() => {});
+        }
+      }),
     ];
 
     return () => unsubs.forEach((u) => u());
-  }, [conversationId, user?.id, updateMessages, loadConversationMeta, loadMessages, t.common.error, scrollToLatest]);
+  }, [conversationId, user?.id, updateMessages, loadConversationMeta, loadMessages, t.common.error, scrollToLatest, applyMessages]);
 
   const handleSend = async () => {
     if (!inputText.trim() || !conversationId || !user) return;
@@ -745,6 +757,35 @@ export default function ChatScreen() {
     setEditText('');
   };
 
+  const handleClearChat = useCallback(() => {
+    if (!conversationId) return;
+    Alert.alert(t.chat.clearChat, t.chat.clearChatConfirm, [
+      { text: t.common.cancel, style: 'cancel' },
+      {
+        text: t.chat.clearChat,
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            applyMessages([]);
+            setPinnedMessages([]);
+            setPinnedIds(new Set());
+            setPinnedEntries([]);
+            setShowUnreadDivider(false);
+            setReplyTo(null);
+            setEditingMessage(null);
+            setEditText('');
+            await cacheManager.clearConversationMessages(conversationId);
+            useChatComposerStore.getState().clearDraft(conversationId);
+            await api.clearConversation(conversationId);
+          } catch (err) {
+            await loadMessages();
+            Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
+          }
+        },
+      },
+    ]);
+  }, [conversationId, applyMessages, loadMessages, t]);
+
   const primarySelected = getPrimarySelected();
   const hiddenActions: MessageAction[] = [];
   if (primarySelected) {
@@ -905,6 +946,9 @@ export default function ChatScreen() {
                   : isOtherTyping || isTyping ? t.chat.typing : otherUser.status === 'ONLINE' ? t.chat.online : t.chat.offline}
               </Text>
             </View>
+            <TouchableOpacity onPress={handleClearChat} style={styles.headerMenuBtn} accessibilityLabel={t.chat.clearChat}>
+              <Ionicons name="ellipsis-vertical" size={22} color={colors.text} />
+            </TouchableOpacity>
           </>
         )}
         {selectionMode && (
@@ -1156,6 +1200,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backBtn: { marginRight: -4 },
+  headerMenuBtn: { padding: Spacing.xs },
   headerInfo: { flex: 1 },
   headerName: { fontWeight: '600' },
   pinnedBar: {
