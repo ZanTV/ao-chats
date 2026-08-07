@@ -31,7 +31,12 @@ export async function verifyEmailTransport(): Promise<boolean> {
     return false;
   }
   try {
-    await getTransporter().verify();
+    await Promise.race([
+      getTransporter().verify(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('SMTP verify timed out after 8s')), 8000)
+      ),
+    ]);
     transporterVerified = true;
     console.log(`✓ Email ready (${config.smtp.user})`);
     return true;

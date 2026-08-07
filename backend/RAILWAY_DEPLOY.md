@@ -10,7 +10,7 @@ Copy from your local `backend/.env.production`:
 |----------|---------|
 | `NODE_ENV` | `production` |
 | `DATABASE_URL` | Neon pooled PostgreSQL URL |
-| `DATABASE_URL_UNPOOLED` | Neon direct URL (optional — falls back to DATABASE_URL) |
+| `DATABASE_URL_UNPOOLED` | Neon direct URL (optional — auto-copied from `DATABASE_URL` if missing) |
 | `REDIS_URL` | `rediss://default:...@....upstash.io:6379` |
 | `JWT_SECRET` | Strong random secret |
 | `JWT_REFRESH_SECRET` | Strong random secret |
@@ -23,4 +23,12 @@ Copy from your local `backend/.env.production`:
 | `CORS_ORIGIN` | `https://www.aochats.chat` |
 | `SOCKET_CORS_ORIGIN` | `https://www.aochats.chat` |
 
-Health: `https://api.aochats.chat/health`
+Health: `https://api.aochats.chat/health` (must return HTTP **200** for Railway)
+
+## Healthcheck failure — common causes
+
+1. **Root Directory** must be `backend` (not repo root).
+2. **Missing variables** on Railway — especially `JWT_REFRESH_SECRET`, `REDIS_URL`, `SMTP_*`, `CLIENT_URL`.
+3. Old deploy blocked startup (db push + SMTP verify before port open) — fixed in latest code: server listens first, schema push runs in background.
+4. Check **Deploy Logs** in Railway for `Environment configuration failed` — that means a required variable is missing.
+

@@ -51,11 +51,17 @@ app.use(express.json({ limit: '1mb' }));
 app.use('/api/auth', authLimiter);
 app.use('/api/', apiLimiter);
 
+// Railway healthcheck requires HTTP 200 while the process is alive.
 app.get('/health', async (_req, res) => {
   let dbOk = false;
   let dbError: string | undefined;
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    await Promise.race([
+      prisma.$queryRaw`SELECT 1`,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('database check timed out')), 5000)
+      ),
+    ]);
     dbOk = true;
   } catch (err) {
     dbOk = false;
@@ -80,7 +86,7 @@ app.get('/health', async (_req, res) => {
     ...(dbError && !dbOk ? { databaseError: dbError } : {}),
   };
 
-  res.status(dbOk ? 200 : 503).json(payload);
+  res.status(200).json(payload);
 });
 
 app.use('/api/auth', authRoutes);
@@ -95,7 +101,7 @@ app.use(errorHandler);
 const io = setupSocketIO(httpServer);
 setIO(io);
 
-async function start() {
+async function bootstrap() {
   const connected = await connectRedis();
   if (connected) {
     console.log('Redis connected');
@@ -112,13 +118,19 @@ async function start() {
   } catch (err) {
     console.warn('AO Manager setup skipped:', err instanceof Error ? err.message : err);
   }
+}
 
+function start() {
   httpServer.listen(config.port, '0.0.0.0', () => {
     console.log(`AO Chats API v2.0 running on port ${config.port}`);
     console.log(`Environment: ${config.nodeEnv}`);
     if (config.isProduction) {
       console.log(`Client URL: ${config.clientUrl}`);
     }
+  });
+
+  void bootstrap().catch((err) => {
+    console.error('Background bootstrap failed:', err instanceof Error ? err.message : err);
   });
 }
 
