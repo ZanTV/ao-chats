@@ -39,6 +39,51 @@ export function dedupeMessages<T extends { id: string }>(list: T[]): T[] {
   return Array.from(map.values());
 }
 
+function isSameMessage(a: ChatMessage, b: ChatMessage): boolean {
+  return (
+    a.senderId === b.senderId &&
+    a.content === b.content &&
+    Math.abs(new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) < 15000
+  );
+}
+
+/** Merge local cache, remote fetch, and pending sends without duplicates */
+export function mergeMessagesForLoad(...lists: ChatMessage[][]): ChatMessage[] {
+  const byId = new Map<string, ChatMessage>();
+
+  for (const list of lists) {
+    for (const msg of list) {
+      const existing = byId.get(msg.id);
+      if (existing) {
+        byId.set(msg.id, {
+          ...existing,
+          ...msg,
+          pending: msg.pending ?? existing.pending,
+          failed: msg.failed ?? existing.failed,
+        });
+      } else {
+        byId.set(msg.id, msg);
+      }
+    }
+  }
+
+  let merged = Array.from(byId.values());
+
+  merged = merged.filter((msg) => {
+    if (!msg.pending && !msg.id.startsWith('temp-')) return true;
+    const confirmed = merged.some(
+      (other) =>
+        other.id !== msg.id &&
+        !other.pending &&
+        !other.id.startsWith('temp-') &&
+        isSameMessage(msg, other)
+    );
+    return !confirmed;
+  });
+
+  return merged.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
 /**
  * Insert or update a message without duplication.
  * Handles optimistic temp IDs and race between REST + Socket.IO.

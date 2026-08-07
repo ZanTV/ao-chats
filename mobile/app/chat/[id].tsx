@@ -39,12 +39,13 @@ import { ApiError } from '../../src/utils/validation';
 import {
   ChatMessage,
   dedupeMessages,
+  mergeMessagesForLoad,
   normalizeMessage,
   upsertMessage,
 } from '../../src/utils/messages';
 import { applyStatusUpdate } from '../../src/utils/messageStatus';
 import { setActiveConversation } from '../../src/services/activeConversation';
-import { playIncomingChatFeedback } from '../../src/services/feedbackService';
+import { playIncomingChatFeedback, playOutgoingChatFeedback } from '../../src/services/feedbackService';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 type Message = ChatMessage;
@@ -192,8 +193,10 @@ export default function ChatScreen() {
     hasMoreRef.current = true;
 
     const local = await cacheManager.getLocalMessages(conversationId);
+    const pending = useChatComposerStore.getState().getPendingMessages(conversationId);
+
     if (local.length > 0) {
-      applyMessages(local);
+      applyMessages(mergeMessagesForLoad(local, pending));
       setLoading(false);
     }
 
@@ -203,16 +206,7 @@ export default function ChatScreen() {
       nextCursorRef.current = msgRes.nextCursor ?? null;
       hasMoreRef.current = msgRes.hasMore ?? remote.length >= MESSAGE_PAGE_SIZE;
 
-      if (local.length > 0) {
-        applyMessages(dedupeMessages([...local, ...remote]));
-      } else {
-        applyMessages(remote);
-      }
-
-      const pending = useChatComposerStore.getState().getPendingMessages(conversationId);
-      if (pending.length > 0) {
-        applyMessages(dedupeMessages([...messagesRef.current, ...pending]));
-      }
+      applyMessages(mergeMessagesForLoad(local, remote, pending));
     } catch (err) {
       if (!messagesRef.current.length) {
         setLoadError(err instanceof Error ? err.message : t.common.error);
@@ -409,24 +403,12 @@ export default function ChatScreen() {
         updateMessages((prev) => upsertMessage(prev, msg, raw.tempId));
         if (msg.senderId !== user?.id && conversationId) {
           socketService.markDelivered(msg.id, conversationId);
-          if (stickToBottomRef.current) {
-            socketService.markRead(conversationId);
-          } else {
-            setPendingBelowCount((count) => count + 1);
-            playIncomingChatFeedback().catch(() => {});
-          }
-        }
-        if (stickToBottomRef.current && !isJumpingRef.current) {
-          setTimeout(() => scrollToLatest(true), 80);
-        }
-      })),
-      socketService.on('message:reply', dedupeSocketHandler((data: unknown) => {
-        const raw = data as Record<string, unknown> & { tempId?: string };
-        const msg = normalizeMessage(raw);
-        updateMessages((prev) => upsertMessage(prev, msg, raw.tempId));
-        if (msg.senderId !== user?.id && !stickToBottomRef.current) {
-          setPendingBelowCount((count) => count + 1);
           playIncomingChatFeedback().catch(() => {});
+          if (!stickToBottomRef.current) {
+            setPendingBelowCount((count) => count + 1);
+          } else {
+            socketService.markRead(conversationId);
+          }
         }
         if (stickToBottomRef.current && !isJumpingRef.current) {
           setTimeout(() => scrollToLatest(true), 80);
@@ -585,6 +567,7 @@ export default function ChatScreen() {
 
     stickToBottomRef.current = true;
     updateMessages((prev) => [...prev, optimistic]);
+    playOutgoingChatFeedback().catch(() => {});
     setInputText('');
     if (conversationId) {
       useChatComposerStore.getState().clearDraft(conversationId);

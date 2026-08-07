@@ -73,21 +73,28 @@ class ApiClient {
     }
 
     if (response.status === 401) {
-      const refreshed = await this.refreshToken();
-      if (refreshed) {
-        const newToken = await getAccessToken();
-        headers['Authorization'] = `Bearer ${newToken}`;
-        const retry = await this.fetchWithTimeout(`${this.baseUrl}${endpoint}`, {
-          ...options,
-          headers,
-        });
-        if (!retry.ok) {
-          const err = await this.parseJsonSafe(retry).catch(() => ({ error: 'Request failed' }));
-          throw new ApiError(formatApiError(err as { error?: string }), (err as { code?: string }).code);
+      const isPublicAuth =
+        /^\/auth\/(login|register|forgot-password|reset-password|verify|resend)/.test(endpoint);
+
+      if (!isPublicAuth && token) {
+        const refreshed = await this.refreshToken();
+        if (refreshed) {
+          const newToken = await getAccessToken();
+          headers['Authorization'] = `Bearer ${newToken}`;
+          const retry = await this.fetchWithTimeout(`${this.baseUrl}${endpoint}`, {
+            ...options,
+            headers,
+          });
+          if (!retry.ok) {
+            const err = await this.parseJsonSafe(retry).catch(() => ({ error: 'Request failed' }));
+            throw new ApiError(formatApiError(err as { error?: string }), (err as { code?: string }).code);
+          }
+          return (await this.parseJsonSafe(retry)) as T;
         }
-        return (await this.parseJsonSafe(retry)) as T;
       }
-      throw new ApiError('Session expired', 'UNAUTHORIZED');
+
+      const err = await this.parseJsonSafe(response).catch(() => ({ error: 'Unauthorized' }));
+      throw new ApiError(formatApiError(err as { error?: string }), (err as { code?: string }).code);
     }
 
     if (!response.ok) {

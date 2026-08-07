@@ -149,10 +149,18 @@ export class AuthService {
   async login(email: string, password: string, deviceInfo?: string, ipAddress?: string) {
     const normalizedEmail = email.toLowerCase().trim();
     const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-    if (!user) throw new AppError(401, 'Invalid email or password');
+    if (!user) {
+      throw new AppError(
+        404,
+        'No account available for this email. Please create one.',
+        'EMAIL_NOT_FOUND'
+      );
+    }
 
     const valid = await comparePassword(password, user.passwordHash);
-    if (!valid) throw new AppError(401, 'Invalid email or password');
+    if (!valid) {
+      throw new AppError(401, 'Incorrect password. Please try again.', 'INVALID_PASSWORD');
+    }
 
     if (!user.emailVerified) {
       // User completed verification (codes cleared) but flag missing — repair legacy/broken rows

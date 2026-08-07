@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Input } from '../../src/components/Input';
 import { Button } from '../../src/components/Button';
+import { AppLogo } from '../../src/components/AppLogo';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { Spacing, BorderRadius } from '../../src/theme';
@@ -28,6 +29,7 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
+  const [errorCode, setErrorCode] = useState<string | null>(null);
 
   const handleLogin = async () => {
     const newErrors: Record<string, string> = {};
@@ -41,14 +43,15 @@ export default function LoginScreen() {
     setLoading(true);
     setErrors({});
     setFormError('');
+    setErrorCode(null);
     try {
       await login(email.trim().toLowerCase(), password, rememberMe);
       router.replace('/(tabs)');
     } catch (err) {
       if (err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED') {
-        if (Platform.OS === 'web') {
-          setFormError(t.auth.verifyLoginPrompt);
-        } else {
+        setErrorCode('EMAIL_NOT_VERIFIED');
+        setFormError(t.auth.verifyLoginPrompt);
+        if (Platform.OS !== 'web') {
           Alert.alert(
             t.auth.verifyEmail,
             t.auth.verifyLoginPrompt,
@@ -67,6 +70,18 @@ export default function LoginScreen() {
               },
             ]
           );
+        }
+      } else if (err instanceof ApiError && err.code === 'EMAIL_NOT_FOUND') {
+        setErrorCode('EMAIL_NOT_FOUND');
+        setFormError(t.auth.noAccountForEmail);
+        if (Platform.OS !== 'web') {
+          Alert.alert(t.auth.login, t.auth.noAccountForEmail);
+        }
+      } else if (err instanceof ApiError && err.code === 'INVALID_PASSWORD') {
+        setErrorCode('INVALID_PASSWORD');
+        setFormError(t.auth.incorrectPassword);
+        if (Platform.OS !== 'web') {
+          Alert.alert(t.auth.login, t.auth.incorrectPassword);
         }
       } else {
         const message = err instanceof Error ? err.message : t.common.error;
@@ -88,15 +103,15 @@ export default function LoginScreen() {
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
-            <View style={[styles.logoCircle, { backgroundColor: colors.primary + '15' }]}>
-              <Text style={[styles.logoText, { color: colors.primary }]}>AO</Text>
-            </View>
-            <Text style={[styles.title, { color: colors.text, fontSize: fonts.title }]}>
-              {t.app.name}
-            </Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary, fontSize: fonts.md }]}>
-              {t.app.tagline}
-            </Text>
+            <AppLogo
+              size={96}
+              title={t.app.name}
+              tagline={t.app.tagline}
+              titleColor={colors.text}
+              taglineColor={colors.textSecondary}
+              titleSize={fonts.title}
+              taglineSize={fonts.md}
+            />
           </View>
 
           <View style={styles.form}>
@@ -146,7 +161,7 @@ export default function LoginScreen() {
             {formError ? (
               <View style={[styles.errorBox, { backgroundColor: colors.danger + '15' }]}>
                 <Text style={[styles.errorText, { color: colors.danger }]}>{formError}</Text>
-                {formError === t.auth.verifyLoginPrompt ? (
+                {errorCode === 'EMAIL_NOT_VERIFIED' ? (
                   <TouchableOpacity
                     onPress={() =>
                       router.push({
@@ -158,8 +173,15 @@ export default function LoginScreen() {
                       })
                     }
                   >
-                    <Text style={[styles.verifyLink, { color: colors.primary }]}>
+                    <Text style={[styles.actionLink, { color: colors.primary }]}>
                       {t.auth.verifyNow}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {errorCode === 'EMAIL_NOT_FOUND' ? (
+                  <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
+                    <Text style={[styles.actionLink, { color: colors.primary }]}>
+                      {t.auth.createAccount}
                     </Text>
                   </TouchableOpacity>
                 ) : null}
@@ -190,17 +212,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scroll: { flexGrow: 1, padding: Spacing.lg, justifyContent: 'center' },
   header: { alignItems: 'center', marginBottom: Spacing.xxl },
-  logoCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.md,
-  },
-  logoText: { fontSize: 32, fontWeight: '800' },
-  title: { fontWeight: '700', marginBottom: Spacing.xs },
-  subtitle: { textAlign: 'center' },
   form: { marginBottom: Spacing.xl },
   row: {
     flexDirection: 'row',
@@ -219,6 +230,6 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     borderRadius: BorderRadius.md,
   },
-  errorText: { fontSize: 14, textAlign: 'center' },
-  verifyLink: { fontSize: 14, fontWeight: '600', textAlign: 'center', marginTop: Spacing.sm },
+  errorText: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  actionLink: { fontSize: 14, fontWeight: '600', textAlign: 'center', marginTop: Spacing.sm },
 });

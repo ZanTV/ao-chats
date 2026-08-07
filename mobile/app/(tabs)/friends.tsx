@@ -69,6 +69,7 @@ export default function FriendsScreen() {
   const [sentRequests, setSentRequests] = useState<SentRequest[]>([]);
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [pendingUserIds, setPendingUserIds] = useState<Set<string>>(new Set());
 
@@ -381,14 +382,29 @@ export default function FriendsScreen() {
       </View>
 
       {tab === 'search' && (
-        <View style={[styles.searchBar, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+        <View
+          style={[
+            styles.searchBar,
+            {
+              backgroundColor: colors.inputBackground,
+              borderColor: searchFocused ? colors.primary : colors.border,
+              borderWidth: 1,
+            },
+          ]}
+        >
           <Ionicons name="search" size={20} color={colors.textTertiary} />
           <TextInput
-            style={[styles.searchInput, { color: colors.text, fontSize: fonts.md }]}
+            style={[
+              styles.searchInput,
+              { color: colors.text, fontSize: fonts.md },
+              Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null,
+            ]}
             placeholder={t.friends.search}
             placeholderTextColor={colors.textTertiary}
             value={searchQuery}
             onChangeText={handleSearch}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
             autoFocus
           />
         </View>

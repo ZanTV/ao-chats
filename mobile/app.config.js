@@ -41,7 +41,7 @@ module.exports = ({ config }) => ({
       },
     ],
   },
-  plugins: ['expo-router', 'expo-secure-store', 'expo-asset', 'expo-sqlite', 'expo-notifications'],
+  plugins: ['expo-router', 'expo-secure-store', 'expo-asset', 'expo-sqlite', 'expo-notifications', 'expo-audio'],
   experiments: {
     typedRoutes: true,
   },

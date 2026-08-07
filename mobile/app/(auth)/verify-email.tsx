@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { VerifyEmailForm } from '../../src/components/VerifyEmailForm';
+import { AppLogo } from '../../src/components/AppLogo';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { Spacing } from '../../src/theme';
 
@@ -24,8 +25,17 @@ export default function VerifyEmailScreen() {
         </TouchableOpacity>
 
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.header}>
+            <AppLogo
+              size={80}
+              showTitle={false}
+            />
+          </View>
           <Text style={[styles.title, { color: colors.text, fontSize: fonts.title }]}>
             {t.auth.verifyEmail}
+          </Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary, fontSize: fonts.md }]}>
+            {t.auth.verifySubtitle}
           </Text>
 
           <VerifyEmailForm
@@ -44,5 +54,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   back: { padding: Spacing.lg, paddingBottom: Spacing.sm },
   scroll: { padding: Spacing.lg, flexGrow: 1 },
-  title: { fontWeight: '700', marginBottom: Spacing.md },
+  header: { alignItems: 'center', marginBottom: Spacing.lg },
+  title: { fontWeight: '700', marginBottom: Spacing.sm, textAlign: 'center' },
+  subtitle: { marginBottom: Spacing.lg, textAlign: 'center', lineHeight: 22 },
 });

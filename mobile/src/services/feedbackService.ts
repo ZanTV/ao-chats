@@ -1,6 +1,7 @@
 import { Platform, Vibration } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useSettingsStore } from '../stores/settingsStore';
+import { playReceivedChatSound, playSentChatSound } from '../utils/chatSounds';
 
 type FeedbackKind = 'chat' | 'notification';
 
@@ -9,20 +10,31 @@ async function canUseHaptics(): Promise<boolean> {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
 
-export async function playIncomingChatFeedback(): Promise<void> {
+export async function playOutgoingChatFeedback(): Promise<void> {
   const { chatSound, chatVibration } = useSettingsStore.getState();
   if (chatVibration) {
     if (await canUseHaptics()) {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else if (Platform.OS !== 'web') {
-      Vibration.vibrate(20);
+      Vibration.vibrate(15);
     }
   }
-  if (chatSound && Platform.OS !== 'web') {
-    // Soft system-style tap — respects silent mode on iOS via haptics-first design
+  if (chatSound) {
+    await playSentChatSound();
+  }
+}
+
+export async function playIncomingChatFeedback(): Promise<void> {
+  const { chatSound, chatVibration } = useSettingsStore.getState();
+  if (chatVibration) {
     if (await canUseHaptics()) {
-      await Haptics.selectionAsync();
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (Platform.OS !== 'web') {
+      Vibration.vibrate([0, 25, 40, 25]);
     }
+  }
+  if (chatSound) {
+    await playReceivedChatSound();
   }
 }
 

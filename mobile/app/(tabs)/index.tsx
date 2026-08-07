@@ -42,6 +42,7 @@ interface Conversation {
     isSystemAccount?: boolean;
   } | null;
   lastMessage: {
+    id?: string;
     content: string;
     preview?: string;
     senderId: string;
@@ -296,7 +297,7 @@ export default function HomeScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text, fontSize: fonts.title }]}>
-          {t.home.title}
+          {t.app.name}
         </Text>
         <NotificationBell />
       </View>
