@@ -14,13 +14,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../src/components/Avatar';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
+import { useChatComposerStore } from '../../src/stores/chatComposerStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
 import { cacheManager, CacheDomain } from '../../src/cache';
 import { NotificationBell } from '../../src/components/NotificationPanel';
 import {
   formatConversationTime,
-  getLastMessagePreview,
+  getConversationListPreview,
   sortConversations,
 } from '../../src/utils/conversation';
 import { Spacing, BorderRadius } from '../../src/theme';
@@ -60,6 +61,7 @@ interface ConversationUpdatePayload {
 export default function HomeScreen() {
   const { user } = useAuthStore();
   const { colors, fonts, t, language } = useSettingsStore();
+  const { drafts, pendingByConversation, loadAll } = useChatComposerStore();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -122,8 +124,9 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      loadAll();
       loadConversations();
-    }, [loadConversations])
+    }, [loadAll, loadConversations])
   );
 
   useEffect(() => {
@@ -159,12 +162,26 @@ export default function HomeScreen() {
     const displayName = item.otherUser
       ? `${item.otherUser.firstName} ${item.otherUser.lastName}`
       : 'Unknown';
-    const preview = getLastMessagePreview(
+    const previewMeta = getConversationListPreview(
       item.lastMessage,
+      drafts[item.id],
+      pendingByConversation[item.id],
       user?.id || '',
-      t.home.startChat
+      {
+        you: t.chat.you,
+        draft: t.home.draft,
+        sending: t.home.sending,
+        failed: t.home.sendFailed,
+        fallback: t.home.startChat,
+      }
     );
     const timeSource = item.lastMessage?.createdAt || item.updatedAt;
+    const previewColor =
+      previewMeta.isDraft || previewMeta.isPending
+        ? colors.draftText
+        : item.unreadCount > 0
+          ? colors.text
+          : colors.textSecondary;
 
     return (
       <TouchableOpacity
@@ -201,12 +218,16 @@ export default function HomeScreen() {
             <Text
               style={[
                 styles.chatPreview,
-                { color: item.unreadCount > 0 ? colors.text : colors.textSecondary, fontSize: fonts.sm },
-                item.unreadCount > 0 && { fontWeight: '600' },
+                {
+                  color: previewColor,
+                  fontSize: fonts.sm,
+                  fontStyle: previewMeta.isDraft || previewMeta.isPending ? 'italic' : 'normal',
+                },
+                item.unreadCount > 0 && !previewMeta.isDraft && !previewMeta.isPending && { fontWeight: '600' },
               ]}
               numberOfLines={1}
             >
-              {preview}
+              {previewMeta.text}
             </Text>
             {item.isPinned && (
               <Ionicons name="pin" size={14} color={colors.primary} style={{ marginLeft: 4 }} />

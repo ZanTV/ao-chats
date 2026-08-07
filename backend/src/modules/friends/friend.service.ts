@@ -139,6 +139,31 @@ export class FriendService {
     return { message: 'Friend request accepted', friend: request.sender };
   }
 
+  async cancelRequest(requestId: string, userId: string) {
+    const request = await prisma.friendRequest.findUnique({
+      where: { id: requestId },
+    });
+
+    if (!request) throw new AppError(404, 'Request not found');
+    if (request.senderId !== userId) throw new AppError(403, 'Not authorized');
+    if (request.status !== 'PENDING') throw new AppError(400, 'Request already processed');
+
+    await prisma.friendRequest.delete({ where: { id: requestId } });
+    await cacheDel(CacheKeys.userFriends(request.senderId), CacheKeys.userFriends(request.receiverId));
+
+    try {
+      const io = getIO();
+      io?.to(`user:${request.receiverId}`).emit('friend:request:cancelled', {
+        requestId,
+        senderId: request.senderId,
+      });
+    } catch {
+      // optional
+    }
+
+    return { message: 'Request cancelled' };
+  }
+
   async getFriends(userId: string) {
     const cacheKey = CacheKeys.userFriends(userId);
     const cached = await cacheGetVersioned<unknown[]>(cacheKey);

@@ -112,6 +112,7 @@ export default function FriendsScreen() {
     const unsubs = [
       socketService.on('friend:request', () => loadData()),
       socketService.on('friend:accepted', () => loadData()),
+      socketService.on('friend:request:cancelled', () => loadData()),
     ];
     return () => unsubs.forEach((u) => u());
   }, [loadData]);
@@ -159,6 +160,20 @@ export default function FriendsScreen() {
   const handleRespond = async (requestId: string, accept: boolean) => {
     try {
       await api.respondToRequest(requestId, accept);
+      loadData();
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : t.common.error);
+    }
+  };
+
+  const handleCancelRequest = async (requestId: string, receiverId: string) => {
+    try {
+      await api.cancelFriendRequest(requestId);
+      setPendingUserIds((prev) => {
+        const next = new Set(prev);
+        next.delete(receiverId);
+        return next;
+      });
       loadData();
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : t.common.error);
@@ -300,7 +315,16 @@ export default function FriendsScreen() {
           @{item.receiver.username} · {t.friends.waitingForAccept}
         </Text>
       </View>
-      <Button title={t.friends.startChat} onPress={() => handleStartChat(item.receiver.id)} size="sm" variant="outline" />
+      <View style={styles.sentActions}>
+        <Button title={t.friends.startChat} onPress={() => handleStartChat(item.receiver.id)} size="sm" variant="outline" />
+        <TouchableOpacity
+          style={[styles.actionBtn, { backgroundColor: colors.danger + '20' }]}
+          onPress={() => handleCancelRequest(item.id, item.receiver.id)}
+          accessibilityLabel={t.friends.cancelRequest}
+        >
+          <Ionicons name="close" size={20} color={colors.danger} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -508,6 +532,7 @@ const styles = StyleSheet.create({
   itemSub: { marginTop: 2 },
   pendingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flexWrap: 'wrap' },
   requestActions: { flexDirection: 'row', gap: Spacing.sm },
+  sentActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   searchActions: { alignItems: 'flex-end', gap: Spacing.xs },
   pendingPill: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
   actionBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },

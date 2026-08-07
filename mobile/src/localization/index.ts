@@ -39,6 +39,9 @@ export const en = {
     noChats: 'No conversations yet',
     startChat: 'Start a conversation with a friend',
     pinned: 'Pinned',
+    draft: 'Draft',
+    sending: 'Sending…',
+    sendFailed: 'Not sent',
   },
   chat: {
     typeMessage: 'Type a message...',
@@ -80,6 +83,9 @@ export const en = {
     deletedMessage: 'This message was deleted',
     searchEmoji: 'Search emoji',
     pinHeader: 'Pinned',
+    seeMore: 'See more',
+    seeLess: 'See less',
+    scrollDown: 'Scroll down',
   },
   friends: {
     title: 'Friends',
@@ -105,6 +111,7 @@ export const en = {
     waitingForAccept: 'Waiting for them to accept',
     noPendingRequests: 'No pending friend requests',
     searchHint: 'Type at least 2 characters to search',
+    cancelRequest: 'Cancel',
   },
   notifications: {
     title: 'Notifications',
@@ -222,6 +229,9 @@ export const sw: typeof en = {
     noChats: 'Hakuna mazungumzo bado',
     startChat: 'Anza mazungumzo na rafiki',
     pinned: 'Imebandikwa',
+    draft: 'Rasimu',
+    sending: 'Inatumwa…',
+    sendFailed: 'Haijatumwa',
   },
   chat: {
     typeMessage: 'Andika ujumbe...',
@@ -263,6 +273,9 @@ export const sw: typeof en = {
     deletedMessage: 'Ujumbe huu umefutwa',
     searchEmoji: 'Tafuta emoji',
     pinHeader: 'Imebandikwa',
+    seeMore: 'Ona zaidi',
+    seeLess: 'Ona kidogo',
+    scrollDown: 'Scroll chini',
   },
   friends: {
     title: 'Marafiki',
@@ -288,6 +301,7 @@ export const sw: typeof en = {
     waitingForAccept: 'Unasubiri akubali',
     noPendingRequests: 'Hakuna maombi ya urafiki yanayosubiri',
     searchHint: 'Andika angalau herufi 2 kutafuta',
+    cancelRequest: 'Ghairi',
   },
   notifications: {
     title: 'Arifa',

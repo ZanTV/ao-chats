@@ -29,6 +29,7 @@ import { NewMessagesButton } from '../../src/components/chat/NewMessagesButton';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useNotificationStore } from '../../src/stores/notificationStore';
+import { useChatComposerStore } from '../../src/stores/chatComposerStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
 import { cacheManager, MESSAGE_PAGE_SIZE } from '../../src/cache';
@@ -106,9 +107,12 @@ export default function ChatScreen() {
   const [infoMessage, setInfoMessage] = useState<Message | null>(null);
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
   const [pendingBelowCount, setPendingBelowCount] = useState(0);
+  const [showScrollDown, setShowScrollDown] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const draftSaveTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const inputTextRef = useRef('');
   const messagesRef = useRef<Message[]>([]);
   const stickToBottomRef = useRef(true);
   const isJumpingRef = useRef(false);
@@ -118,6 +122,7 @@ export default function ChatScreen() {
   const scrollToLatest = useCallback((animated = true) => {
     stickToBottomRef.current = true;
     setPendingBelowCount(0);
+    setShowScrollDown(false);
     requestAnimationFrame(() => {
       flatListRef.current?.scrollToEnd({ animated });
     });
@@ -162,9 +167,16 @@ export default function ChatScreen() {
     setMessages((prev) => {
       const next = updater(prev);
       persistMessages(next);
+      if (conversationId) {
+        useChatComposerStore.getState().syncPendingFromMessages(conversationId, next);
+      }
       return next;
     });
-  }, [persistMessages]);
+  }, [persistMessages, conversationId]);
+
+  useEffect(() => {
+    inputTextRef.current = inputText;
+  }, [inputText]);
 
   const loadMessages = useCallback(async () => {
     if (!conversationId) return;
@@ -188,6 +200,11 @@ export default function ChatScreen() {
         applyMessages(dedupeMessages([...local, ...remote]));
       } else {
         applyMessages(remote);
+      }
+
+      const pending = useChatComposerStore.getState().getPendingMessages(conversationId);
+      if (pending.length > 0) {
+        applyMessages(dedupeMessages([...messagesRef.current, ...pending]));
       }
     } catch (err) {
       if (!messagesRef.current.length) {
@@ -334,10 +351,14 @@ export default function ChatScreen() {
       highlightDoneRef.current = null;
       stickToBottomRef.current = true;
       setPendingBelowCount(0);
+      setShowScrollDown(false);
       setLoading(true);
       setActiveConversation(conversationId);
 
       const openChat = async () => {
+        await useChatComposerStore.getState().loadAll();
+        const draft = useChatComposerStore.getState().getDraft(conversationId);
+        if (draft) setInputText(draft);
         await loadMessages();
         await loadConversationMeta();
         if (!highlightParam) {
@@ -351,6 +372,11 @@ export default function ChatScreen() {
       openChat();
 
       return () => {
+        if (draftSaveTimeout.current) clearTimeout(draftSaveTimeout.current);
+        if (conversationId) {
+          useChatComposerStore.getState().setDraft(conversationId, inputTextRef.current);
+          useChatComposerStore.getState().syncPendingFromMessages(conversationId, messagesRef.current);
+        }
         setActiveConversation(null);
         socketService.leaveConversation(conversationId);
         setShowUnreadDivider(false);
@@ -547,6 +573,9 @@ export default function ChatScreen() {
     stickToBottomRef.current = true;
     updateMessages((prev) => [...prev, optimistic]);
     setInputText('');
+    if (conversationId) {
+      useChatComposerStore.getState().clearDraft(conversationId);
+    }
     setReplyTo(null);
     socketService.stopTyping(conversationId);
     scrollToLatest(true);
@@ -587,6 +616,12 @@ export default function ChatScreen() {
 
   const handleTyping = (text: string) => {
     setInputText(text);
+    if (conversationId) {
+      if (draftSaveTimeout.current) clearTimeout(draftSaveTimeout.current);
+      draftSaveTimeout.current = setTimeout(() => {
+        useChatComposerStore.getState().setDraft(conversationId, text);
+      }, 300);
+    }
     if (!conversationId) return;
     socketService.startTyping(conversationId);
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
@@ -814,6 +849,8 @@ export default function ChatScreen() {
           onReactionPress={(emoji) => handleReactionChipPress(message, emoji)}
           deletedLabel={t.chat.deletedMessage}
           compactBottom={compactBottom}
+          seeMoreLabel={t.chat.seeMore}
+          seeLessLabel={t.chat.seeLess}
         />
       </View>
     );
@@ -892,6 +929,7 @@ export default function ChatScreen() {
         <FlatList
           ref={flatListRef}
           data={listData}
+          style={styles.messageList}
           renderItem={renderListItem}
           keyExtractor={(item, index) =>
             item.kind === 'divider' ? `divider-${index}` : item.message.id
@@ -902,13 +940,16 @@ export default function ChatScreen() {
             const atBottom =
               layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
             stickToBottomRef.current = atBottom;
+            setShowScrollDown(!atBottom);
             if (atBottom) setPendingBelowCount(0);
             if (contentOffset.y < 60 && hasMoreRef.current && !loadingOlder) {
               loadOlderMessages();
             }
           }}
-          scrollEventThrottle={64}
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          scrollEventThrottle={16}
+          maintainVisibleContentPosition={
+            Platform.OS === 'web' ? undefined : { minIndexForVisible: 0 }
+          }
           onContentSizeChange={() => {
             if (isJumpingRef.current) return;
             if (stickToBottomRef.current) {
@@ -941,8 +982,10 @@ export default function ChatScreen() {
           }
         />
         <NewMessagesButton
+          visible={showScrollDown || pendingBelowCount > 0}
           count={pendingBelowCount}
           label={t.notifications.newMessage}
+          scrollDownLabel={t.chat.scrollDown}
           onPress={() => scrollToLatest(true)}
           colors={colors}
           fonts={fonts}
@@ -1066,7 +1109,13 @@ const styles = StyleSheet.create({
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.lg },
   retryBtn: { marginTop: Spacing.md, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, borderRadius: BorderRadius.md },
   messagesList: { padding: Spacing.md, flexGrow: 1, paddingTop: Spacing.lg },
-  listWrap: { flex: 1, position: 'relative' },
+  messageList: {
+    flex: 1,
+    ...(Platform.OS === 'web'
+      ? ({ overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as object)
+      : null),
+  },
+  listWrap: { flex: 1, position: 'relative', minHeight: 0 },
   selectedWrap: { borderRadius: BorderRadius.md, marginHorizontal: -4, paddingHorizontal: 4 },
   emptyChat: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
   inputBar: {

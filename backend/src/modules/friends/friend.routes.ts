@@ -62,6 +62,14 @@ router.patch(
 );
 
 router.delete(
+  '/request/:requestId',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const result = await friendService.cancelRequest(paramId(req.params.requestId), req.userId!);
+    res.json(result);
+  })
+);
+
+router.delete(
   '/:friendId',
   asyncHandler(async (req: AuthRequest, res) => {
     const result = await friendService.removeFriend(req.userId!, paramId(req.params.friendId));

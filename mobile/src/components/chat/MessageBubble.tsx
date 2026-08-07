@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -48,6 +48,8 @@ interface Props {
   currentUserId?: string;
   deletedLabel?: string;
   compactBottom?: boolean;
+  seeMoreLabel?: string;
+  seeLessLabel?: string;
 }
 
 export function MessageBubble({
@@ -64,8 +66,15 @@ export function MessageBubble({
   currentUserId,
   deletedLabel = 'This message was deleted',
   compactBottom = false,
+  seeMoreLabel = 'See more',
+  seeLessLabel = 'See less',
 }: Props) {
+  const [expanded, setExpanded] = useState(false);
   const highlight = useSharedValue(0);
+
+  const displayContent = message.deletedForAll ? deletedLabel : message.content;
+  const isLongMessage = !message.deletedForAll && message.content.length > 220;
+  const isCollapsed = isLongMessage && !expanded;
 
   useEffect(() => {
     if (isHighlighted) {
@@ -94,6 +103,7 @@ export function MessageBubble({
 
   const bubbleBg = isOwn ? colors.bubbleSent : colors.bubbleReceived;
   const textColor = isOwn ? colors.bubbleSentText : colors.bubbleReceivedText;
+  const toggleLabelColor = isOwn ? 'rgba(255,255,255,0.92)' : colors.primary;
 
   return (
     <Animated.View
@@ -139,9 +149,24 @@ export function MessageBubble({
           <Ionicons name="pin" size={12} color={textColor + '99'} style={styles.pinIcon} />
         )}
 
-        <Text style={[styles.messageText, { color: textColor, fontSize: fonts.md }]}>
-          {message.deletedForAll ? deletedLabel : message.content}
+        <Text
+          style={[styles.messageText, { color: textColor, fontSize: fonts.md }]}
+          numberOfLines={isCollapsed ? 6 : undefined}
+        >
+          {displayContent}
         </Text>
+
+        {isLongMessage && (
+          <Pressable
+            onPress={() => setExpanded((value) => !value)}
+            hitSlop={8}
+            style={styles.seeMoreBtn}
+          >
+            <Text style={[styles.seeMoreText, { color: toggleLabelColor, fontSize: fonts.sm }]}>
+              {expanded ? seeLessLabel : seeMoreLabel}
+            </Text>
+          </Pressable>
+        )}
 
         <View style={styles.footer}>
           {message.isStarred && (
@@ -201,6 +226,8 @@ const styles = StyleSheet.create({
   forwardedLabel: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
   pinIcon: { position: 'absolute', top: 6, right: 8 },
   messageText: { lineHeight: 22 },
+  seeMoreBtn: { alignSelf: 'flex-start', marginTop: 4, marginBottom: 2 },
+  seeMoreText: { fontWeight: '700' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4, gap: 2 },
   time: {},
   statusWrap: { marginLeft: 4 },

@@ -203,6 +203,8 @@ class ApiClient {
       method: 'PATCH',
       body: JSON.stringify({ accept }),
     });
+  cancelFriendRequest = (requestId: string) =>
+    this.request(`/friends/request/${requestId}`, { method: 'DELETE' });
   removeFriend = (friendId: string) =>
     this.request(`/friends/${friendId}`, { method: 'DELETE' });
   blockUser = (userId: string) =>

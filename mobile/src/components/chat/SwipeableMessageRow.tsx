@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -49,9 +49,35 @@ interface Props {
   currentUserId?: string;
   deletedLabel?: string;
   compactBottom?: boolean;
+  seeMoreLabel?: string;
+  seeLessLabel?: string;
 }
 
-export function SwipeableMessageRow(props: Props) {
+function MessageRowContent(props: Props) {
+  return (
+    <Pressable onPress={props.onPress} onLongPress={props.onLongPress} delayLongPress={280}>
+      <MessageBubble
+        message={props.message}
+        isOwn={props.isOwn}
+        isSelected={props.isSelected}
+        isPinned={props.isPinned}
+        isHighlighted={props.isHighlighted}
+        colors={props.colors}
+        fonts={props.fonts}
+        formatTime={props.formatTime}
+        onReplyPress={props.onReplyPress}
+        onReactionPress={props.onReactionPress}
+        currentUserId={props.currentUserId}
+        deletedLabel={props.deletedLabel}
+        compactBottom={props.compactBottom}
+        seeMoreLabel={props.seeMoreLabel}
+        seeLessLabel={props.seeLessLabel}
+      />
+    </Pressable>
+  );
+}
+
+function SwipeableMessageRowNative(props: Props) {
   const translateX = useSharedValue(0);
   const triggered = useSharedValue(false);
 
@@ -90,26 +116,22 @@ export function SwipeableMessageRow(props: Props) {
         <Animated.View style={[styles.replyHint, replyHintStyle]}>
           <Ionicons name="arrow-undo" size={20} color={props.colors.primary} />
         </Animated.View>
-        <Pressable onPress={props.onPress} onLongPress={props.onLongPress} delayLongPress={280}>
-          <MessageBubble
-            message={props.message}
-            isOwn={props.isOwn}
-            isSelected={props.isSelected}
-            isPinned={props.isPinned}
-            isHighlighted={props.isHighlighted}
-            colors={props.colors}
-            fonts={props.fonts}
-            formatTime={props.formatTime}
-            onReplyPress={props.onReplyPress}
-            onReactionPress={props.onReactionPress}
-            currentUserId={props.currentUserId}
-            deletedLabel={props.deletedLabel}
-            compactBottom={props.compactBottom}
-          />
-        </Pressable>
+        <MessageRowContent {...props} />
       </Animated.View>
     </GestureDetector>
   );
+}
+
+export function SwipeableMessageRow(props: Props) {
+  if (Platform.OS === 'web') {
+    return (
+      <View style={[styles.row, props.compactBottom && styles.rowCompact]}>
+        <MessageRowContent {...props} />
+      </View>
+    );
+  }
+
+  return <SwipeableMessageRowNative {...props} />;
 }
 
 const styles = StyleSheet.create({

@@ -24,6 +24,7 @@ export const Colors = {
     inputBackground: '#F9FAFB',
     tabBar: '#FFFFFF',
     headerBackground: '#FFFFFF',
+    draftText: '#6366F1',
   },
   dark: {
     background: '#0F172A',
@@ -50,6 +51,7 @@ export const Colors = {
     inputBackground: '#1E293B',
     tabBar: '#1E293B',
     headerBackground: '#1E293B',
+    draftText: '#A5B4FC',
   },
 };
 
