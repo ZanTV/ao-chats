@@ -3,6 +3,8 @@
   "version": "2.0.0",
   "main": "expo-router/entry",
   "scripts": {
+    "dev": "expo start --clear --port 8081",
+    "web": "expo start --web --port 8081",
     "start": "expo start",
     "start:clear": "expo start --clear",
     "start:lan": "expo start --clear --port 8081",

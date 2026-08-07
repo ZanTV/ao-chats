@@ -19,7 +19,24 @@ ao-chats-v2/
 
 ## Quick Start
 
-### 1. Start Database & Redis
+### One command (recommended)
+
+From the project root:
+
+```bash
+npm install
+npm run dev
+```
+
+This will:
+1. Create `backend/.env.development` and `mobile/.env.development` from examples if missing
+2. Start Docker PostgreSQL + Redis (when Docker is available)
+3. Start the API at `http://localhost:3001`
+4. Start the web app at `http://localhost:8081` and open it in your browser
+
+### Manual setup
+
+#### 1. Start Database & Redis
 
 ```bash
 docker-compose up -d

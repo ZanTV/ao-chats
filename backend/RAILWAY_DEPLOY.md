@@ -1,34 +1,92 @@
 # Railway Deployment — AO Chats Backend
 
-Set **Root Directory** = `backend` in Railway service settings.
+## Step 1 — Railway service settings
 
-## Required variables (Railway Dashboard → Variables)
+| Setting | Value |
+|---------|--------|
+| **Root Directory** | `backend` |
+| **Start Command** | `node scripts/start-prod.mjs` (from `railway.toml`) |
+| **Healthcheck** | `/health` |
 
-Copy from your local `backend/.env.production`:
+Connect GitHub repo: `ZanTV/ao-chats` → branch `main`.
 
-| Variable | Example |
-|----------|---------|
+Custom domain: `api.aochats.chat` → Railway service.
+
+---
+
+## Step 2 — Environment variables (MOST COMMON FAILURE)
+
+Copy **all** values from your local `backend/.env.production` into Railway:
+
+**Railway Dashboard → your service → Variables → Raw Editor** → paste entire file → Save.
+
+Or from terminal (after `railway login` + `railway link`):
+
+```bash
+cd backend
+npm run railway:sync-env
+```
+
+### Required variables
+
+| Variable | Notes |
+|----------|--------|
 | `NODE_ENV` | `production` |
-| `DATABASE_URL` | Neon pooled PostgreSQL URL |
-| `DATABASE_URL_UNPOOLED` | Neon direct URL (optional — auto-copied from `DATABASE_URL` if missing) |
-| `REDIS_URL` | `rediss://default:...@....upstash.io:6379` |
+| `DATABASE_URL` | Neon **pooled** URL |
+| `DATABASE_URL_UNPOOLED` | Neon direct URL (optional — auto-copied if missing) |
+| `REDIS_URL` | Upstash `rediss://...` |
 | `JWT_SECRET` | Strong random secret |
 | `JWT_REFRESH_SECRET` | Strong random secret |
 | `SMTP_HOST` | `smtp.gmail.com` |
 | `SMTP_PORT` | `587` |
-| `SMTP_USER` | Your Gmail |
-| `SMTP_PASS` | Gmail App Password |
-| `EMAIL_FROM` | `AO Chats <noreply@aochats.com>` |
+| `SMTP_USER` | Gmail address |
+| `SMTP_PASS` | Gmail App Password (use quotes if it contains spaces) |
 | `CLIENT_URL` | `https://www.aochats.chat` |
 | `CORS_ORIGIN` | `https://www.aochats.chat` |
 | `SOCKET_CORS_ORIGIN` | `https://www.aochats.chat` |
 
-Health: `https://api.aochats.chat/health` (must return HTTP **200** for Railway)
+Check locally before deploy:
 
-## Healthcheck failure — common causes
+```bash
+cd backend
+npm run railway:check
+```
 
-1. **Root Directory** must be `backend` (not repo root).
-2. **Missing variables** on Railway — especially `JWT_REFRESH_SECRET`, `REDIS_URL`, `SMTP_*`, `CLIENT_URL`.
-3. Old deploy blocked startup (db push + SMTP verify before port open) — fixed in latest code: server listens first, schema push runs in background.
-4. Check **Deploy Logs** in Railway for `Environment configuration failed` — that means a required variable is missing.
+---
 
+## Step 3 — Deploy
+
+Push to `main` on GitHub — Railway redeploys automatically.
+
+Or: Railway Dashboard → **Deploy** → **Redeploy**.
+
+---
+
+## Step 4 — Verify
+
+```bash
+curl https://api.aochats.chat/health
+```
+
+Expected: HTTP **200** with `"database":"connected"`.
+
+---
+
+## If deploy fails — read Deploy Logs
+
+| Log message | Fix |
+|-------------|-----|
+| `Railway production env check failed` | Missing variables — Step 2 |
+| `DATABASE_URL_UNPOOLED` / P1012 | Fixed in latest code — redeploy from `main` |
+| `Healthcheck failure` | Server crashed — check env vars above |
+| `Environment configuration failed` | JWT or SMTP missing / placeholder values |
+
+---
+
+## Quick checklist
+
+- [ ] Root Directory = `backend`
+- [ ] All variables from `.env.production` in Railway
+- [ ] `JWT_REFRESH_SECRET` set (not placeholder)
+- [ ] Latest code pushed to GitHub `main`
+- [ ] `/health` returns 200

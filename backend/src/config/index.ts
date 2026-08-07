@@ -5,13 +5,19 @@ import {
   type EnvValidationResult,
 } from './validate';
 import { currentNodeEnv, loadedEnvFile } from './loadEnv';
+import { isRailway } from './platform';
 
 const nodeEnv = currentNodeEnv;
 const isProduction = nodeEnv === 'production';
 
 const validation = validateEnvironment(nodeEnv, loadedEnvFile);
 if (!validation.valid) {
-  throw new Error(formatValidationError(validation));
+  const message = formatValidationError(validation);
+  if (isProduction && isRailway()) {
+    console.error('[AO Chats] Environment warning on Railway:\n' + message);
+  } else {
+    throw new Error(message);
+  }
 }
 
 function env(name: string, fallback?: string): string {

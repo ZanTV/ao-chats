@@ -1,0 +1,19 @@
+{
+  "name": "ao-chats",
+  "version": "2.0.0",
+  "private": true,
+  "description": "AO Chats v2.0 — local development workspace",
+  "scripts": {
+    "setup": "node scripts/setup-dev-env.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:mobile": "npm run dev --prefix mobile",
+    "dev:web": "npm run web --prefix mobile",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "open": "^10.1.0",
+    "wait-on": "^8.0.1"
+  }
+}
