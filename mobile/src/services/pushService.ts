@@ -1,5 +1,4 @@
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
@@ -8,20 +7,52 @@ import { useNotificationStore } from '../stores/notificationStore';
 import { triggerFeedback } from './feedbackService';
 import { getActiveConversation } from './activeConversation';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+type NotificationsModule = typeof import('expo-notifications');
+
+let notificationsModule: NotificationsModule | null | undefined;
+let handlerConfigured = false;
+
+/** Push is unavailable in Expo Go on Android (SDK 53+) and on web. */
+function pushSupported(): boolean {
+  if (Platform.OS === 'web') return false;
+  if (Constants.appOwnership === 'expo' && Platform.OS === 'android') return false;
+  return true;
+}
+
+function getNotifications(): NotificationsModule | null {
+  if (notificationsModule !== undefined) return notificationsModule;
+  if (!pushSupported()) {
+    notificationsModule = null;
+    return null;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('expo-notifications') as NotificationsModule;
+    if (!handlerConfigured) {
+      mod.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
+      handlerConfigured = true;
+    }
+    notificationsModule = mod;
+    return mod;
+  } catch {
+    notificationsModule = null;
+    return null;
+  }
+}
 
 let initialized = false;
 
 async function syncBadgeCount(count: number): Promise<void> {
-  if (Platform.OS === 'web') return;
+  const Notifications = getNotifications();
+  if (!Notifications) return;
   try {
     await Notifications.setBadgeCountAsync(Math.max(0, count));
   } catch {
@@ -34,7 +65,8 @@ export async function updateAppBadge(count: number): Promise<void> {
 }
 
 export async function registerForPushNotifications(): Promise<string | null> {
-  if (Platform.OS === 'web' || !Device.isDevice) return null;
+  const Notifications = getNotifications();
+  if (!Notifications || !Device.isDevice) return null;
 
   const { status: existing } = await Notifications.getPermissionsAsync();
   let finalStatus = existing;
@@ -89,7 +121,8 @@ function navigateFromNotification(data: Record<string, unknown>): void {
 }
 
 export async function initializePushNotifications(): Promise<() => void> {
-  if (initialized) return () => {};
+  const Notifications = getNotifications();
+  if (!Notifications || initialized) return () => {};
   initialized = true;
 
   const token = await registerForPushNotifications();
@@ -145,7 +178,8 @@ export async function initializePushNotifications(): Promise<() => void> {
 }
 
 export async function unregisterPushNotifications(): Promise<void> {
-  if (Platform.OS === 'web') return;
+  const Notifications = getNotifications();
+  if (!Notifications) return;
   try {
     await Notifications.setBadgeCountAsync(0);
   } catch {

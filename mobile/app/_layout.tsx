@@ -13,6 +13,7 @@ import { LoadingScreen } from '../src/components/LoadingScreen';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { NotificationPanel } from '../src/components/NotificationPanel';
 import { GlobalRealtimeListeners } from '../src/components/GlobalRealtimeListeners';
+import { hydrateLocalCache } from '../src/cache';
 import { initializePushNotifications, unregisterPushNotifications } from '../src/services/pushService';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -46,9 +47,17 @@ export default function RootLayout() {
     let cancelled = false;
 
     (async () => {
-      await hydrateLocalCache();
+      try {
+        await hydrateLocalCache();
+      } catch {
+        // cache optional at startup
+      }
       if (cancelled) return;
-      await Promise.all([loadSettings(), initializeAuth()]);
+      try {
+        await Promise.all([loadSettings(), initializeAuth()]);
+      } catch {
+        // still allow app to open
+      }
       if (!cancelled) setAppReady(true);
     })();
 
