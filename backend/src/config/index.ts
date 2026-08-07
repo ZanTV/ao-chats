@@ -43,8 +43,12 @@ export const config = {
   redisUrl: isProduction
     ? env('REDIS_URL')
     : env('REDIS_URL', 'redis://localhost:6379'),
-  apiUrl: isProduction ? env('API_URL') : env('API_URL', `http://localhost:${port}`),
-  socketUrl: isProduction ? env('SOCKET_URL') : env('SOCKET_URL', `http://localhost:${port}`),
+  apiUrl: isProduction
+    ? process.env.API_URL?.trim() || 'https://api.aochats.chat'
+    : env('API_URL', `http://localhost:${port}`),
+  socketUrl: isProduction
+    ? process.env.SOCKET_URL?.trim() || 'https://api.aochats.chat'
+    : env('SOCKET_URL', `http://localhost:${port}`),
   jwt: {
     secret: isProduction ? env('JWT_SECRET') : env('JWT_SECRET', 'dev-secret-change-me'),
     refreshSecret: isProduction

@@ -10,8 +10,6 @@ const PRODUCTION_REQUIRED = [
   'SMTP_USER',
   'SMTP_PASS',
   'CLIENT_URL',
-  'API_URL',
-  'SOCKET_URL',
   'SOCKET_CORS_ORIGIN',
 ] as const;
 
@@ -79,8 +77,17 @@ export function validateEnvironment(
 
   if (isProduction) {
     const jwtSecret = getEnv('JWT_SECRET');
-    if (jwtSecret === DEFAULT_JWT_SECRET || jwtSecret === DEFAULT_DEV_JWT_SECRET) {
-      missing.push('JWT_SECRET (must not use default value in production)');
+    const jwtRefresh = getEnv('JWT_REFRESH_SECRET');
+    if (
+      !jwtSecret ||
+      jwtSecret.includes('<') ||
+      jwtSecret === DEFAULT_JWT_SECRET ||
+      jwtSecret === DEFAULT_DEV_JWT_SECRET
+    ) {
+      missing.push('JWT_SECRET (set a strong production secret, not a placeholder)');
+    }
+    if (!jwtRefresh || jwtRefresh.includes('<')) {
+      missing.push('JWT_REFRESH_SECRET (set a strong production secret, not a placeholder)');
     }
   }
 

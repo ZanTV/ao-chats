@@ -10,9 +10,10 @@ const envFile = path.join(root, `.env.${nodeEnv}`);
 const legacyEnvFile = path.join(root, '.env');
 
 if (fs.existsSync(envFile)) {
-  dotenv.config({ path: envFile });
+  // Override stale OS/shell variables so .env.production / .env.development wins locally
+  dotenv.config({ path: envFile, override: true });
 } else if (nodeEnv !== 'production' && fs.existsSync(legacyEnvFile)) {
-  dotenv.config({ path: legacyEnvFile });
+  dotenv.config({ path: legacyEnvFile, override: true });
 }
 
 export const loadedEnvFile = fs.existsSync(envFile)
