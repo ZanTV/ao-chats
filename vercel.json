@@ -38,6 +38,7 @@
     "EXPO_PUBLIC_APP_URL": "https://www.aochats.chat",
     "EXPO_PUBLIC_API_URL": "https://api.aochats.chat/api",
     "EXPO_PUBLIC_SOCKET_URL": "https://api.aochats.chat",
+    "EXPO_PUBLIC_STORAGE_URL": "https://www.aochats.chat",
     "EXPO_PUBLIC_ENV": "production"
   }
 }

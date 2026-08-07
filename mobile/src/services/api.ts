@@ -1,6 +1,8 @@
 import { getAccessToken, getRefreshToken, saveTokens, clearTokens } from './storage';
 import { getApiUrl, API_TIMEOUT_MS } from './config';
 import { formatApiError, ApiError } from '../utils/validation';
+import { isJwtExpired } from '../utils/jwt';
+import { socketService } from './socket';
 
 class ApiClient {
   private get baseUrl() {
@@ -98,6 +100,14 @@ class ApiClient {
     return (await this.parseJsonSafe(response)) as T;
   }
 
+  /** Proactively refresh an expired access token before the first API call. */
+  async ensureValidSession(): Promise<boolean> {
+    const access = await getAccessToken();
+    if (!access) return false;
+    if (!isJwtExpired(access)) return true;
+    return this.refreshToken();
+  }
+
   private async refreshToken(): Promise<boolean> {
     try {
       const refresh = await getRefreshToken();
@@ -121,6 +131,7 @@ class ApiClient {
         return false;
       }
       await saveTokens(accessToken, refresh);
+      socketService.reconnect().catch(() => {});
       return true;
     } catch {
       await clearTokens();
@@ -168,10 +179,11 @@ class ApiClient {
       body: JSON.stringify({ password }),
     });
 
-  getUniversities = () => this.request<{ universities: string[] }>('/auth/universities');
+  getUniversities = () =>
+    this.request<{ universities: string[]; cacheVersion?: number }>('/auth/universities');
 
   getAvatars = () =>
-    this.request<{ categories: Record<string, string[]> }>('/auth/avatars');
+    this.request<{ categories: Record<string, string[]>; cacheVersion?: number }>('/auth/avatars');
 
   // Users
   getProfile = () => this.request('/users/me');
@@ -240,9 +252,17 @@ class ApiClient {
     this.request(`/conversations/${id}/read`, { method: 'POST' });
 
   // Messages
-  getMessages = (conversationId: string, cursor?: string) => {
-    const params = cursor ? `?cursor=${cursor}` : '';
-    return this.request(`/messages/${conversationId}${params}`);
+  getMessages = (conversationId: string, cursor?: string, limit = 30) => {
+    const params = new URLSearchParams();
+    if (cursor) params.set('cursor', cursor);
+    params.set('limit', String(limit));
+    const qs = params.toString();
+    return this.request<{
+      messages: Record<string, unknown>[];
+      nextCursor?: string | null;
+      hasMore?: boolean;
+      cacheVersion?: number;
+    }>(`/messages/${conversationId}?${qs}`);
   };
   getMessagesAround = (conversationId: string, messageId: string, limit = 50) =>
     this.request<{ messages: Record<string, unknown>[] }>(
@@ -302,6 +322,18 @@ class ApiClient {
     this.request('/notifications/read-all', { method: 'POST' });
   deleteNotification = (id: string) =>
     this.request(`/notifications/${id}`, { method: 'DELETE' });
+
+  registerPushToken = (token: string, platform: string) =>
+    this.request('/users/push-token', {
+      method: 'POST',
+      body: JSON.stringify({ token, platform }),
+    });
+
+  unregisterPushToken = (token: string) =>
+    this.request('/users/push-token', {
+      method: 'DELETE',
+      body: JSON.stringify({ token }),
+    });
 }
 
 export const api = new ApiClient();

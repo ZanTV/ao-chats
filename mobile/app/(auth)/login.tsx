@@ -42,7 +42,7 @@ export default function LoginScreen() {
     setErrors({});
     setFormError('');
     try {
-      await login(email, password, rememberMe);
+      await login(email.trim().toLowerCase(), password, rememberMe);
       router.replace('/(tabs)');
     } catch (err) {
       if (err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED') {

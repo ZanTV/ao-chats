@@ -28,6 +28,32 @@ router.patch(
   })
 );
 
+router.post(
+  '/push-token',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const { token, platform } = req.body as { token?: string; platform?: string };
+    if (!token?.trim()) {
+      res.status(400).json({ error: 'Push token is required' });
+      return;
+    }
+    await userService.registerPushToken(req.userId!, token.trim(), platform);
+    res.json({ success: true });
+  })
+);
+
+router.delete(
+  '/push-token',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const { token } = req.body as { token?: string };
+    if (!token?.trim()) {
+      res.status(400).json({ error: 'Push token is required' });
+      return;
+    }
+    await userService.unregisterPushToken(req.userId!, token.trim());
+    res.json({ success: true });
+  })
+);
+
 router.get(
   '/search',
   validateQuery(searchUsersSchema),

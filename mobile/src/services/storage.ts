@@ -1,14 +1,15 @@
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mmkvGet, mmkvSet, mmkvDelete } from '../cache/mmkvStore';
+import { CacheDomain } from '../cache/types';
 
 const TOKEN_KEY = 'ao_access_token';
 const REFRESH_KEY = 'ao_refresh_token';
-const USER_CACHE_KEY = 'cache:user_profile';
 
 const isWeb = Platform.OS === 'web';
 
-function safeParse<T>(raw: string | null): T | null {
+function safeParse<T>(raw: string | null | undefined): T | null {
   if (!raw) return null;
   try {
     return JSON.parse(raw) as T;
@@ -27,9 +28,8 @@ function safeStringify(value: unknown): string | null {
 
 async function memoryFallbackGet(key: string): Promise<string | null> {
   try {
-    if (typeof globalThis !== 'undefined' && (globalThis as { __aoMem?: Map<string, string> }).__aoMem) {
-      return (globalThis as { __aoMem: Map<string, string> }).__aoMem.get(key) ?? null;
-    }
+    const g = globalThis as unknown as { __aoMem?: Map<string, string> };
+    if (g.__aoMem) return g.__aoMem.get(key) ?? null;
   } catch {
     // ignore
   }
@@ -139,92 +139,58 @@ export async function clearTokens() {
   ]);
 }
 
-async function storageSet(key: string, value: string): Promise<void> {
+/** AsyncStorage — lightweight preferences only (theme, language, onboarding) */
+async function preferenceSet(key: string, value: string): Promise<void> {
   try {
-    await AsyncStorage.setItem(key, value);
+    await AsyncStorage.setItem(`pref:${key}`, value);
   } catch {
     if (isWeb) {
       try {
-        if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
-        else await memoryFallbackSet(key, value);
+        if (typeof localStorage !== 'undefined') localStorage.setItem(`pref:${key}`, value);
+        else await memoryFallbackSet(`pref:${key}`, value);
       } catch {
-        await memoryFallbackSet(key, value);
+        await memoryFallbackSet(`pref:${key}`, value);
       }
     } else {
-      await memoryFallbackSet(key, value);
+      await memoryFallbackSet(`pref:${key}`, value);
     }
   }
 }
 
-async function storageGet(key: string): Promise<string | null> {
+async function preferenceGet(key: string): Promise<string | null> {
   try {
-    return await AsyncStorage.getItem(key);
+    return await AsyncStorage.getItem(`pref:${key}`);
   } catch {
     if (isWeb) {
       try {
-        if (typeof localStorage !== 'undefined') return localStorage.getItem(key);
+        if (typeof localStorage !== 'undefined') return localStorage.getItem(`pref:${key}`);
       } catch {
         // ignore
       }
     }
-    return memoryFallbackGet(key);
+    return memoryFallbackGet(`pref:${key}`);
   }
 }
 
-async function storageRemove(key: string): Promise<void> {
-  try {
-    await AsyncStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
-  if (isWeb) {
-    try {
-      if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
-    } catch {
-      // ignore
-    }
-  }
-  await memoryFallbackDelete(key);
-}
-
+/** MMKV — fast local cache for user profile */
 export async function cacheUser(user: unknown) {
-  const raw = safeStringify(user);
+  const raw = safeStringify({ version: Date.now(), updatedAt: new Date().toISOString(), data: user });
   if (!raw) return;
-  await storageSet(USER_CACHE_KEY, raw);
+  mmkvSet(`cache:${CacheDomain.USER_PROFILE}`, raw);
 }
 
 export async function getCachedUser<T>(): Promise<T | null> {
-  const raw = await storageGet(USER_CACHE_KEY);
-  return safeParse<T>(raw);
+  const raw = mmkvGet(`cache:${CacheDomain.USER_PROFILE}`);
+  const envelope = safeParse<{ data: T }>(raw);
+  return envelope?.data ?? null;
 }
 
 export async function clearCachedUser() {
-  await storageRemove(USER_CACHE_KEY);
-}
-
-export async function cacheData(key: string, data: unknown) {
-  const raw = safeStringify(data);
-  if (!raw) return;
-  await storageSet(`cache:${key}`, raw);
-}
-
-export async function getCachedData<T>(key: string): Promise<T | null> {
-  const raw = await storageGet(`cache:${key}`);
-  return safeParse<T>(raw);
-}
-
-export async function clearCache() {
-  try {
-    const keys = await AsyncStorage.getAllKeys();
-    const cacheKeys = keys.filter((k) => k.startsWith('cache:'));
-    if (cacheKeys.length > 0) await AsyncStorage.multiRemove(cacheKeys);
-  } catch {
-    // ignore — cache clear is best-effort
-  }
+  mmkvDelete(`cache:${CacheDomain.USER_PROFILE}`);
 }
 
 export async function getSetting<T>(key: string, defaultValue: T): Promise<T> {
-  const raw = await storageGet(`setting:${key}`);
+  const raw = await preferenceGet(key);
   const parsed = safeParse<T>(raw);
   return parsed ?? defaultValue;
 }
@@ -232,5 +198,8 @@ export async function getSetting<T>(key: string, defaultValue: T): Promise<T> {
 export async function setSetting(key: string, value: unknown) {
   const raw = safeStringify(value);
   if (!raw) return;
-  await storageSet(`setting:${key}`, raw);
+  await preferenceSet(key, raw);
 }
+
+/** Re-export cache helpers — heavy data lives in MMKV/SQLite via cacheManager */
+export { cacheData, getCachedData, clearCache, cacheManager } from '../cache';

@@ -43,6 +43,11 @@ class SocketService {
     });
   }
 
+  async reconnect(): Promise<void> {
+    this.disconnect();
+    await this.connect();
+  }
+
   disconnect(): void {
     this.socket?.disconnect();
     this.socket = null;

@@ -25,12 +25,14 @@ import { MessageInfoSheet } from '../../src/components/chat/MessageInfoSheet';
 import { PinnedBar } from '../../src/components/chat/PinnedBar';
 import { PinnedHistorySheet, PinnedEntry } from '../../src/components/chat/PinnedHistorySheet';
 import { UnreadDivider } from '../../src/components/chat/UnreadDivider';
+import { NewMessagesButton } from '../../src/components/chat/NewMessagesButton';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useNotificationStore } from '../../src/stores/notificationStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
-import { cacheData, getCachedData } from '../../src/services/storage';
+import { cacheManager, MESSAGE_PAGE_SIZE } from '../../src/cache';
+import { dedupeSocketHandler } from '../../src/utils/socketDedup';
 import { ApiError } from '../../src/utils/validation';
 import {
   ChatMessage,
@@ -39,6 +41,8 @@ import {
   upsertMessage,
 } from '../../src/utils/messages';
 import { applyStatusUpdate } from '../../src/utils/messageStatus';
+import { setActiveConversation } from '../../src/services/activeConversation';
+import { playIncomingChatFeedback } from '../../src/services/feedbackService';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 type Message = ChatMessage;
@@ -90,7 +94,10 @@ export default function ChatScreen() {
   const [showUnreadDivider, setShowUnreadDivider] = useState(false);
   const [lastReadAt, setLastReadAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const nextCursorRef = useRef<string | null>(null);
+  const hasMoreRef = useRef(true);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
@@ -98,14 +105,23 @@ export default function ChatScreen() {
   const [showForward, setShowForward] = useState(false);
   const [infoMessage, setInfoMessage] = useState<Message | null>(null);
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
+  const [pendingBelowCount, setPendingBelowCount] = useState(0);
 
   const flatListRef = useRef<FlatList>(null);
-  const typingTimeout = useRef<NodeJS.Timeout>();
+  const typingTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const messagesRef = useRef<Message[]>([]);
   const stickToBottomRef = useRef(true);
   const isJumpingRef = useRef(false);
   const unreadSessionRef = useRef(false);
   const highlightDoneRef = useRef<string | null>(null);
+
+  const scrollToLatest = useCallback((animated = true) => {
+    stickToBottomRef.current = true;
+    setPendingBelowCount(0);
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
 
   const otherUser = conversation?.participants.find((p) => p.userId !== user?.id)?.user;
   const recipientOnline = otherUser?.status === 'ONLINE';
@@ -128,14 +144,18 @@ export default function ChatScreen() {
   const persistMessages = useCallback(async (list: Message[]) => {
     if (!conversationId || list.length === 0) return;
     messagesRef.current = list;
-    await cacheData(`messages:${conversationId}`, list);
+    await cacheManager.saveMessages(conversationId, list);
   }, [conversationId]);
 
   const applyMessages = useCallback((list: Message[]) => {
-    const unique = dedupeMessages(list);
+    const unique = dedupeMessages(list).sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt)
+    );
     setMessages(unique);
     messagesRef.current = unique;
-    if (unique.length > 0) cacheData(`messages:${conversationId!}`, unique);
+    if (unique.length > 0 && conversationId) {
+      cacheManager.saveMessages(conversationId, unique).catch(() => {});
+    }
   }, [conversationId]);
 
   const updateMessages = useCallback((updater: (prev: Message[]) => Message[]) => {
@@ -149,11 +169,26 @@ export default function ChatScreen() {
   const loadMessages = useCallback(async () => {
     if (!conversationId) return;
     setLoadError(null);
-    const cached = await getCachedData<Message[]>(`messages:${conversationId}`);
-    if (cached?.length) applyMessages(cached);
+    nextCursorRef.current = null;
+    hasMoreRef.current = true;
+
+    const local = await cacheManager.getLocalMessages(conversationId);
+    if (local.length > 0) {
+      applyMessages(local);
+      setLoading(false);
+    }
+
     try {
-      const msgRes = await api.getMessages(conversationId) as { messages: Record<string, unknown>[] };
-      applyMessages((msgRes.messages || []).map(normalizeMessage));
+      const msgRes = await api.getMessages(conversationId, undefined, MESSAGE_PAGE_SIZE);
+      const remote = (msgRes.messages || []).map(normalizeMessage);
+      nextCursorRef.current = msgRes.nextCursor ?? null;
+      hasMoreRef.current = msgRes.hasMore ?? remote.length >= MESSAGE_PAGE_SIZE;
+
+      if (local.length > 0) {
+        applyMessages(dedupeMessages([...local, ...remote]));
+      } else {
+        applyMessages(remote);
+      }
     } catch (err) {
       if (!messagesRef.current.length) {
         setLoadError(err instanceof Error ? err.message : t.common.error);
@@ -162,6 +197,28 @@ export default function ChatScreen() {
       setLoading(false);
     }
   }, [conversationId, applyMessages, t.common.error]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!conversationId || loadingOlder || !hasMoreRef.current || !nextCursorRef.current) return;
+    setLoadingOlder(true);
+    const cursor = nextCursorRef.current;
+    try {
+      const msgRes = await api.getMessages(conversationId, cursor, MESSAGE_PAGE_SIZE);
+      const older = (msgRes.messages || []).map(normalizeMessage);
+      nextCursorRef.current = msgRes.nextCursor ?? null;
+      hasMoreRef.current = msgRes.hasMore ?? older.length >= MESSAGE_PAGE_SIZE;
+
+      if (older.length > 0) {
+        applyMessages(dedupeMessages([...older, ...messagesRef.current]));
+      } else {
+        hasMoreRef.current = false;
+      }
+    } catch {
+      // keep existing messages
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [conversationId, loadingOlder, applyMessages]);
 
   const loadConversationMeta = useCallback(async () => {
     if (!conversationId) return;
@@ -276,13 +333,17 @@ export default function ChatScreen() {
       unreadSessionRef.current = false;
       highlightDoneRef.current = null;
       stickToBottomRef.current = true;
+      setPendingBelowCount(0);
       setLoading(true);
+      setActiveConversation(conversationId);
 
       const openChat = async () => {
         await loadMessages();
         await loadConversationMeta();
+        if (!highlightParam) {
+          scrollToLatest(false);
+        }
         socketService.joinConversation(conversationId);
-        // Mark read after capturing unread cursor so divider can render for this visit.
         socketService.markRead(conversationId);
         markConversationNotificationsRead(conversationId);
       };
@@ -290,11 +351,12 @@ export default function ChatScreen() {
       openChat();
 
       return () => {
+        setActiveConversation(null);
         socketService.leaveConversation(conversationId);
         setShowUnreadDivider(false);
         unreadSessionRef.current = false;
       };
-    }, [conversationId, loadMessages, loadConversationMeta, markConversationNotificationsRead])
+    }, [conversationId, loadMessages, loadConversationMeta, markConversationNotificationsRead, highlightParam, scrollToLatest])
   );
 
   useEffect(() => {
@@ -308,7 +370,7 @@ export default function ChatScreen() {
     if (!conversationId) return;
 
     const unsubs = [
-      socketService.on('message:new', (data: unknown) => {
+      socketService.on('message:new', dedupeSocketHandler((data: unknown) => {
         const raw = data as Record<string, unknown> & { tempId?: string };
         const msg = normalizeMessage(raw);
         updateMessages((prev) => upsertMessage(prev, msg, raw.tempId));
@@ -316,18 +378,25 @@ export default function ChatScreen() {
           socketService.markDelivered(msg.id, conversationId);
           if (stickToBottomRef.current) {
             socketService.markRead(conversationId);
+          } else {
+            setPendingBelowCount((count) => count + 1);
+            playIncomingChatFeedback().catch(() => {});
           }
         }
         if (stickToBottomRef.current && !isJumpingRef.current) {
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+          setTimeout(() => scrollToLatest(true), 80);
         }
-      }),
+      })),
       socketService.on('message:reply', (data: unknown) => {
         const raw = data as Record<string, unknown> & { tempId?: string };
         const msg = normalizeMessage(raw);
         updateMessages((prev) => upsertMessage(prev, msg, raw.tempId));
+        if (msg.senderId !== user?.id && !stickToBottomRef.current) {
+          setPendingBelowCount((count) => count + 1);
+          playIncomingChatFeedback().catch(() => {});
+        }
         if (stickToBottomRef.current && !isJumpingRef.current) {
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+          setTimeout(() => scrollToLatest(true), 80);
         }
       }),
       socketService.on('message:error', (data: unknown) => {
@@ -439,7 +508,7 @@ export default function ChatScreen() {
     ];
 
     return () => unsubs.forEach((u) => u());
-  }, [conversationId, user?.id, updateMessages, loadConversationMeta, loadMessages, t.common.error]);
+  }, [conversationId, user?.id, updateMessages, loadConversationMeta, loadMessages, t.common.error, scrollToLatest]);
 
   const handleSend = async () => {
     if (!inputText.trim() || !conversationId || !user) return;
@@ -480,7 +549,7 @@ export default function ChatScreen() {
     setInputText('');
     setReplyTo(null);
     socketService.stopTyping(conversationId);
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    scrollToLatest(true);
 
     try {
       const saved = normalizeMessage(
@@ -685,18 +754,20 @@ export default function ChatScreen() {
     bubbleSentText: colors.bubbleSentText,
     bubbleReceivedText: colors.bubbleReceivedText,
     primary: colors.primary,
+    text: colors.text,
     textSecondary: colors.textSecondary,
     textTertiary: colors.textTertiary,
     danger: colors.danger,
     warning: colors.warning,
     surface: colors.surface,
     surfaceSecondary: colors.surfaceSecondary,
+    border: colors.border,
   };
 
   const formatTime = (dateStr: string) =>
     new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  const renderListItem = ({ item }: { item: ListItem }) => {
+  const renderListItem = ({ item, index }: { item: ListItem; index: number }) => {
     if (item.kind === 'divider') {
       return (
         <UnreadDivider
@@ -710,6 +781,16 @@ export default function ChatScreen() {
     const message = item.message;
     const isOwn = message.senderId === user?.id;
     const isSelected = selectedIds.has(message.id);
+    const prevMessage =
+      index > 0 && listData[index - 1]?.kind === 'message'
+        ? (listData[index - 1] as { kind: 'message'; message: Message }).message
+        : null;
+    const compactBottom =
+      !!prevMessage &&
+      prevMessage.senderId === message.senderId &&
+      Math.abs(
+        new Date(message.createdAt).getTime() - new Date(prevMessage.createdAt).getTime()
+      ) < 120_000;
 
     return (
       <View style={isSelected ? [styles.selectedWrap, { backgroundColor: colors.primary + '08' }] : undefined}>
@@ -732,6 +813,7 @@ export default function ChatScreen() {
           onReplyPress={scrollToMessage}
           onReactionPress={(emoji) => handleReactionChipPress(message, emoji)}
           deletedLabel={t.chat.deletedMessage}
+          compactBottom={compactBottom}
         />
       </View>
     );
@@ -806,6 +888,7 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
       ) : (
+        <View style={styles.listWrap}>
         <FlatList
           ref={flatListRef}
           data={listData}
@@ -816,10 +899,16 @@ export default function ChatScreen() {
           contentContainerStyle={styles.messagesList}
           onScroll={(e) => {
             const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
-            stickToBottomRef.current =
+            const atBottom =
               layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
+            stickToBottomRef.current = atBottom;
+            if (atBottom) setPendingBelowCount(0);
+            if (contentOffset.y < 60 && hasMoreRef.current && !loadingOlder) {
+              loadOlderMessages();
+            }
           }}
           scrollEventThrottle={64}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onContentSizeChange={() => {
             if (isJumpingRef.current) return;
             if (stickToBottomRef.current) {
@@ -835,9 +924,15 @@ export default function ChatScreen() {
               });
             }, 120);
           }}
-          initialNumToRender={20}
-          maxToRenderPerBatch={15}
-          windowSize={11}
+          ListHeaderComponent={
+            loadingOlder ? (
+              <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: Spacing.sm }} />
+            ) : null
+          }
+          initialNumToRender={15}
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          updateCellsBatchingPeriod={50}
           removeClippedSubviews={Platform.OS === 'android'}
           ListEmptyComponent={
             <View style={styles.emptyChat}>
@@ -845,6 +940,14 @@ export default function ChatScreen() {
             </View>
           }
         />
+        <NewMessagesButton
+          count={pendingBelowCount}
+          label={t.notifications.newMessage}
+          onPress={() => scrollToLatest(true)}
+          colors={colors}
+          fonts={fonts}
+        />
+        </View>
       )}
 
       {replyTo && (
@@ -962,7 +1065,8 @@ const styles = StyleSheet.create({
   pinnedText: { flex: 1 },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.lg },
   retryBtn: { marginTop: Spacing.md, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, borderRadius: BorderRadius.md },
-  messagesList: { padding: Spacing.md, flexGrow: 1, paddingTop: Spacing.xl + 8 },
+  messagesList: { padding: Spacing.md, flexGrow: 1, paddingTop: Spacing.lg },
+  listWrap: { flex: 1, position: 'relative' },
   selectedWrap: { borderRadius: BorderRadius.md, marginHorizontal: -4, paddingHorizontal: 4 },
   emptyChat: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
   inputBar: {

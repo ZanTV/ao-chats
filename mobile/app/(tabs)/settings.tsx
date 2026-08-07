@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Switch } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,7 +13,12 @@ import { api } from '../../src/services/api';
 
 export default function SettingsScreen() {
   const { logout } = useAuthStore();
-  const { colors, fonts, t, theme, fontSize, language, setTheme, setFontSize, setLanguage } = useSettingsStore();
+  const {
+    colors, fonts, t, theme, fontSize, language,
+    chatSound, chatVibration, notificationSound, notificationVibration,
+    setTheme, setFontSize, setLanguage,
+    setChatSound, setChatVibration, setNotificationSound, setNotificationVibration,
+  } = useSettingsStore();
   const { unreadCount, setPanelOpen } = useNotificationStore();
   const [openingSupport, setOpeningSupport] = useState(false);
 
@@ -115,6 +120,33 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </Section>
 
+        <Section title={t.settings.sounds} colors={colors} fonts={fonts}>
+          <ToggleRow
+            label={t.settings.chatSound}
+            value={chatSound}
+            onValueChange={setChatSound}
+            colors={colors}
+          />
+          <ToggleRow
+            label={t.settings.chatVibration}
+            value={chatVibration}
+            onValueChange={setChatVibration}
+            colors={colors}
+          />
+          <ToggleRow
+            label={t.settings.notificationSound}
+            value={notificationSound}
+            onValueChange={setNotificationSound}
+            colors={colors}
+          />
+          <ToggleRow
+            label={t.settings.notificationVibration}
+            value={notificationVibration}
+            onValueChange={setNotificationVibration}
+            colors={colors}
+          />
+        </Section>
+
         <Section title={t.settings.support} colors={colors} fonts={fonts}>
           <TouchableOpacity
             style={[styles.linkRow, { borderBottomColor: colors.border }]}
@@ -211,6 +243,25 @@ function OptionRow({ label, selected, onPress, colors }: {
       <Text style={[styles.optionLabel, { color: colors.text }]}>{label}</Text>
       {selected && <Ionicons name="checkmark-circle" size={22} color={colors.primary} />}
     </TouchableOpacity>
+  );
+}
+
+function ToggleRow({ label, value, onValueChange, colors }: {
+  label: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  colors: Record<string, string>;
+}) {
+  return (
+    <View style={[styles.optionRow, { borderBottomColor: colors.border }]}>
+      <Text style={[styles.optionLabel, { color: colors.text }]}>{label}</Text>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: colors.border, true: colors.primary + '88' }}
+        thumbColor={value ? colors.primary : colors.surface}
+      />
+    </View>
   );
 }
 

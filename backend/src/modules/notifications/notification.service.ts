@@ -1,6 +1,13 @@
 import { prisma } from '../../config/database';
-import { cacheDel, CacheKeys } from '../../config/redis';
+import {
+  cacheDel,
+  cacheGetVersioned,
+  cacheSetVersioned,
+  CacheKeys,
+  CacheTTL,
+} from '../../config/redis';
 import { NotificationType } from '@prisma/client';
+import { sendPushToUser } from '../../services/push.service';
 
 export class NotificationService {
   async create(
@@ -13,9 +20,31 @@ export class NotificationService {
   ) {
     const notification = await prisma.notification.create({
       data: { userId, type, title, body, actorId, data: (data || {}) as object },
+      include: {
+        actor: {
+          select: { id: true, firstName: true, lastName: true, avatarId: true },
+        },
+      },
     });
 
-    await cacheDel(CacheKeys.notifications(userId));
+    await cacheDel(CacheKeys.notifications(userId), CacheKeys.notificationCount(userId));
+
+    const unreadCount = await this.getUnreadCount(userId);
+    const pushData = {
+      ...(data || {}),
+      notificationId: notification.id,
+      type,
+    } as Record<string, unknown>;
+
+    sendPushToUser(userId, {
+      title,
+      body,
+      sound: 'default',
+      badge: unreadCount,
+      data: pushData,
+      categoryId: type === 'NEW_MESSAGE' ? 'message' : 'social',
+    }).catch(() => {});
+
     return notification;
   }
 
@@ -33,9 +62,17 @@ export class NotificationService {
   }
 
   async getUnreadCount(userId: string) {
-    return prisma.notification.count({
+    const cacheKey = CacheKeys.notificationCount(userId);
+    const cached = await cacheGetVersioned<number>(cacheKey);
+    if (cached?.data !== undefined && cached.data !== null) {
+      return cached.data;
+    }
+
+    const count = await prisma.notification.count({
       where: { userId, isRead: false },
     });
+    await cacheSetVersioned(cacheKey, count, CacheTTL.notifications);
+    return count;
   }
 
   async markAsRead(notificationId: string, userId: string) {
@@ -43,7 +80,7 @@ export class NotificationService {
       where: { id: notificationId, userId },
       data: { isRead: true },
     });
-    await cacheDel(CacheKeys.notifications(userId));
+    await cacheDel(CacheKeys.notifications(userId), CacheKeys.notificationCount(userId));
     return { message: 'Marked as read' };
   }
 
@@ -52,16 +89,26 @@ export class NotificationService {
       where: { userId, isRead: false },
       data: { isRead: true },
     });
-    await cacheDel(CacheKeys.notifications(userId));
+    await cacheDel(CacheKeys.notifications(userId), CacheKeys.notificationCount(userId));
     return { message: 'All marked as read' };
   }
 
   async getSummary(userId: string, limit = 50) {
+    const cacheKey = CacheKeys.notifications(userId);
+    const cached = await cacheGetVersioned<{ notifications: unknown[]; unreadCount: number }>(
+      cacheKey
+    );
+    if (cached?.data) {
+      return { ...cached.data, cacheVersion: cached.version };
+    }
+
     const [notifications, unreadCount] = await Promise.all([
       this.getNotifications(userId, limit),
       this.getUnreadCount(userId),
     ]);
-    return { notifications, unreadCount };
+    const payload = { notifications, unreadCount };
+    const cacheVersion = await cacheSetVersioned(cacheKey, payload, CacheTTL.notifications);
+    return { ...payload, cacheVersion };
   }
 
   async notifyFriendRequest(receiverId: string, senderName: string, senderId: string, requestId: string) {
@@ -95,7 +142,7 @@ export class NotificationService {
     await prisma.notification.deleteMany({
       where: { id: notificationId, userId },
     });
-    await cacheDel(CacheKeys.notifications(userId));
+    await cacheDel(CacheKeys.notifications(userId), CacheKeys.notificationCount(userId));
     return { message: 'Notification deleted' };
   }
 
@@ -109,7 +156,7 @@ export class NotificationService {
       },
       data: { isRead: true },
     });
-    await cacheDel(CacheKeys.notifications(userId));
+    await cacheDel(CacheKeys.notifications(userId), CacheKeys.notificationCount(userId));
     return result.count;
   }
 

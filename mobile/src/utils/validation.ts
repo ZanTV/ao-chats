@@ -16,21 +16,43 @@ export function formatApiError(err: {
 }): string {
   if (err.details) {
     const messages = Object.entries(err.details)
-      .flatMap(([field, msgs]) => (msgs || []).map((m) => `${field}: ${m}`));
+      .flatMap(([field, msgs]) =>
+        (msgs || []).map((m) => {
+          if (/expected string.*undefined/i.test(m) || /required/i.test(m)) {
+            const label = field.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+            return `${label} is required`;
+          }
+          return m.includes(':') ? m : `${field}: ${m}`;
+        })
+      );
     if (messages.length > 0) return messages.join('\n');
+  }
+  if (err.error && err.error !== 'Validation failed') {
+    return err.error;
   }
   const msg = err.error || err.message;
   if (msg) {
-    // Browser/AsyncStorage often surfaces "Unexpected token..." / "Unexpected error"
     if (/unexpected/i.test(msg)) {
-      return 'Could not load or save your data. Please try again.';
+      return 'Could not connect to AO Chats. Check your internet and try again.';
+    }
+    if (/expected string.*undefined/i.test(msg)) {
+      return 'Please fill in all required fields and try again.';
     }
     return msg;
+  }
+  if (err.code === 'VALIDATION_ERROR') {
+    return 'Please check your details and try again.';
   }
   if (err.code === 'INTERNAL_ERROR' || err.code === 'DB_ERROR') {
     return 'Server database error. Please try again in a moment.';
   }
-  return 'Something went wrong';
+  if (err.code === 'EMAIL_NOT_VERIFIED') {
+    return 'Please verify your email first. Check your inbox or request a new code.';
+  }
+  if (err.code === 'NETWORK_ERROR') {
+    return 'Cannot reach the AO Chats server. Check your internet connection.';
+  }
+  return 'Something went wrong. Please try again.';
 }
 
 export function validatePassword(password: string): string | null {

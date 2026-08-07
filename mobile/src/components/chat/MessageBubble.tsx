@@ -1,16 +1,21 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSequence,
   withTiming,
+  interpolateColor,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { AoMessageStatus } from './AoMessageStatus';
+import { ReplyQuotePreview } from './ReplyQuotePreview';
 import { ChatMessage } from '../../utils/messages';
 import { getAoMessageStatus } from '../../utils/messageStatus';
-import { getReplyPreviewText } from '../../utils/replyPreview';
+import {
+  MESSAGE_HIGHLIGHT_FROM,
+  MESSAGE_HIGHLIGHT_TO,
+} from '../../utils/reanimatedColors';
 import { BorderRadius, Spacing } from '../../theme';
 
 interface ThemeColors {
@@ -19,12 +24,14 @@ interface ThemeColors {
   bubbleSentText: string;
   bubbleReceivedText: string;
   primary: string;
+  text: string;
   textSecondary: string;
   textTertiary: string;
   danger: string;
   warning: string;
   surface: string;
   surfaceSecondary?: string;
+  border?: string;
 }
 
 interface Props {
@@ -40,69 +47,7 @@ interface Props {
   onReactionPress?: (emoji: string) => void;
   currentUserId?: string;
   deletedLabel?: string;
-}
-
-function ReplyQuote({
-  replyTo,
-  isOwn,
-  colors,
-  fonts,
-  onPress,
-  deletedLabel = 'This message was deleted',
-}: {
-  replyTo: NonNullable<ChatMessage['replyTo']>;
-  isOwn: boolean;
-  colors: ThemeColors;
-  fonts: { xs: number; sm: number };
-  onPress?: () => void;
-  deletedLabel?: string;
-}) {
-  const accent = isOwn ? 'rgba(255,255,255,0.9)' : colors.primary;
-  const bg = isOwn ? 'rgba(255,255,255,0.14)' : (colors.surfaceSecondary || colors.surface);
-  const nameColor = isOwn ? '#E0E7FF' : colors.primary;
-  const textColor = isOwn ? 'rgba(255,255,255,0.82)' : colors.textSecondary;
-  const preview = getReplyPreviewText(replyTo, deletedLabel);
-  const type = String(replyTo.type || '').toUpperCase();
-  const isMedia = ['IMAGE', 'VIDEO', 'FILE'].includes(type);
-
-  const content = (
-    <View style={[styles.replyContainer, { backgroundColor: bg, borderLeftColor: accent }]}>
-      <View style={styles.replyHeader}>
-        <Ionicons name="return-down-forward" size={12} color={accent} />
-        <Text style={[styles.replyName, { color: nameColor, fontSize: fonts.xs }]} numberOfLines={1}>
-          {replyTo.sender?.firstName || 'Reply'}
-        </Text>
-      </View>
-      <View style={styles.replyBody}>
-        {isMedia && (
-          <Ionicons
-            name={
-              type === 'IMAGE'
-                ? 'image-outline'
-                : type === 'VIDEO'
-                  ? 'videocam-outline'
-                  : 'document-outline'
-            }
-            size={13}
-            color={textColor}
-            style={{ marginRight: 4 }}
-          />
-        )}
-        <Text style={[styles.replyContent, { color: textColor, fontSize: fonts.xs }]} numberOfLines={2}>
-          {preview}
-        </Text>
-      </View>
-    </View>
-  );
-
-  if (onPress) {
-    return (
-      <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={styles.replyWrap}>
-        {content}
-      </TouchableOpacity>
-    );
-  }
-  return <View style={styles.replyWrap}>{content}</View>;
+  compactBottom?: boolean;
 }
 
 export function MessageBubble({
@@ -118,6 +63,7 @@ export function MessageBubble({
   onReactionPress,
   currentUserId,
   deletedLabel = 'This message was deleted',
+  compactBottom = false,
 }: Props) {
   const highlight = useSharedValue(0);
 
@@ -131,7 +77,11 @@ export function MessageBubble({
   }, [isHighlighted, highlight]);
 
   const highlightStyle = useAnimatedStyle(() => ({
-    backgroundColor: `rgba(37, 99, 235, ${highlight.value * 0.22})`,
+    backgroundColor: interpolateColor(
+      highlight.value,
+      [0, 1],
+      [MESSAGE_HIGHLIGHT_FROM, MESSAGE_HIGHLIGHT_TO]
+    ),
   }));
 
   const status = getAoMessageStatus(message, isOwn);
@@ -146,18 +96,14 @@ export function MessageBubble({
   const textColor = isOwn ? colors.bubbleSentText : colors.bubbleReceivedText;
 
   return (
-    <Animated.View style={[styles.wrap, isOwn ? styles.wrapOwn : styles.wrapOther, highlightStyle]}>
-      {message.replyTo && (
-        <ReplyQuote
-          replyTo={message.replyTo}
-          isOwn={isOwn}
-          colors={colors}
-          fonts={fonts}
-          deletedLabel={deletedLabel}
-          onPress={onReplyPress ? () => onReplyPress(message.replyTo!.id) : undefined}
-        />
-      )}
-
+    <Animated.View
+      style={[
+        styles.wrap,
+        isOwn ? styles.wrapOwn : styles.wrapOther,
+        compactBottom && styles.wrapCompact,
+        highlightStyle,
+      ]}
+    >
       <View
         style={[
           styles.bubble,
@@ -169,6 +115,19 @@ export function MessageBubble({
           message.failed && { opacity: 0.65, borderWidth: 1, borderColor: colors.danger },
         ]}
       >
+        {message.replyTo && (
+          <ReplyQuotePreview
+            replyTo={message.replyTo}
+            variant="bubble"
+            isOwn={isOwn}
+            senderLabel={message.replyTo.sender?.firstName || 'Reply'}
+            deletedLabel={deletedLabel}
+            colors={colors}
+            fonts={fonts}
+            onPress={onReplyPress ? () => onReplyPress(message.replyTo!.id) : undefined}
+          />
+        )}
+
         {message.isForwarded && (
           <View style={styles.forwardedLabel}>
             <Ionicons name="arrow-redo-outline" size={12} color={textColor + 'AA'} />
@@ -200,7 +159,7 @@ export function MessageBubble({
       </View>
 
       {Object.keys(groupedReactions).length > 0 && (
-        <View style={[styles.reactionsBar, { backgroundColor: colors.surface }]}>
+        <View style={[styles.reactionsBar, { backgroundColor: colors.surface, borderColor: colors.border || colors.surface }]}>
           {Object.entries(groupedReactions).map(([emoji, meta]) => (
             <Pressable
               key={emoji}
@@ -220,33 +179,23 @@ export function MessageBubble({
 }
 
 const styles = StyleSheet.create({
-  wrap: { maxWidth: '82%', borderRadius: BorderRadius.lg, padding: 2 },
+  wrap: { maxWidth: '84%', borderRadius: BorderRadius.xl, padding: 2 },
   wrapOwn: { alignSelf: 'flex-end' },
   wrapOther: { alignSelf: 'flex-start' },
-  replyWrap: { marginBottom: 4, marginHorizontal: 2 },
-  replyContainer: {
-    borderLeftWidth: 3.5,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.sm + 2,
-    paddingVertical: Spacing.xs + 3,
-  },
-  replyHeader: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
-  replyName: { fontWeight: '700', flexShrink: 1 },
-  replyBody: { flexDirection: 'row', alignItems: 'center' },
-  replyContent: { lineHeight: 16, flex: 1 },
+  wrapCompact: { marginBottom: -2 },
   bubble: {
-    borderRadius: BorderRadius.lg,
+    borderRadius: BorderRadius.xl,
     paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.sm + 2,
-    paddingBottom: Spacing.sm,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
+    paddingTop: Spacing.sm + 4,
+    paddingBottom: Spacing.sm + 2,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  bubbleOwn: { borderBottomRightRadius: 6 },
-  bubbleOther: { borderBottomLeftRadius: 6 },
+  bubbleOwn: { borderBottomRightRadius: 8 },
+  bubbleOther: { borderBottomLeftRadius: 8 },
   pinnedBubble: { borderTopWidth: 2, borderTopColor: 'rgba(251,191,36,0.5)' },
   forwardedBubble: { borderStyle: 'dashed', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
   forwardedLabel: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
@@ -266,6 +215,7 @@ const styles = StyleSheet.create({
     marginTop: -6,
     marginLeft: Spacing.sm,
     elevation: 1,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   reactionChip: {
     borderRadius: BorderRadius.full,

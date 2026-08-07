@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { api } from '../services/api';
 import { socketService } from '../services/socket';
+import { cacheManager, CacheDomain } from '../cache';
+import { updateAppBadge } from '../services/pushService';
+import { triggerFeedback } from '../services/feedbackService';
+import { getActiveConversation } from '../services/activeConversation';
 
 export interface AppNotification {
   id: string;
@@ -59,6 +63,10 @@ function scheduleStatsRefresh(fn: () => void, delay = 600) {
   statsTimer = setTimeout(fn, delay);
 }
 
+function syncBadge(unreadCount: number) {
+  updateAppBadge(unreadCount).catch(() => {});
+}
+
 export const useNotificationStore = create<NotificationState>((set, get) => ({
   notifications: [],
   unreadCount: 0,
@@ -71,21 +79,35 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   setFriendsFocus: (focus) => set({ friendsFocus: focus }),
 
   refresh: async () => {
-    try {
-      set({ loading: true });
-      const summary = await api.getNotificationSummary() as {
-        notifications: AppNotification[];
-        unreadCount: number;
-      };
-      set({
-        notifications: summary.notifications,
-        unreadCount: summary.unreadCount,
-      });
-    } catch {
-      // keep cached
-    } finally {
-      set({ loading: false });
-    }
+    set({ loading: true });
+    await cacheManager.loadWithRefresh<{
+      notifications: AppNotification[];
+      unreadCount: number;
+    }>(
+      CacheDomain.NOTIFICATIONS,
+      async () => {
+        const summary = await api.getNotificationSummary() as {
+          notifications: AppNotification[];
+          unreadCount: number;
+          cacheVersion?: number;
+        };
+        return {
+          data: {
+            notifications: summary.notifications,
+            unreadCount: summary.unreadCount,
+          },
+          cacheVersion: summary.cacheVersion,
+        };
+      },
+      (data) => {
+        set({
+          notifications: data.notifications,
+          unreadCount: data.unreadCount,
+        });
+        syncBadge(data.unreadCount);
+      }
+    );
+    set({ loading: false });
   },
 
   refreshFriendStats: async () => {
@@ -99,16 +121,21 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   markRead: async (id) => {
     await api.markNotificationRead(id);
-    set((state) => ({
-      notifications: state.notifications.map((n) =>
-        n.id === id ? { ...n, isRead: true } : n
-      ),
-      unreadCount: Math.max(0, state.unreadCount - 1),
-    }));
+    set((state) => {
+      const unreadCount = Math.max(0, state.unreadCount - 1);
+      syncBadge(unreadCount);
+      return {
+        notifications: state.notifications.map((n) =>
+          n.id === id ? { ...n, isRead: true } : n
+        ),
+        unreadCount,
+      };
+    });
   },
 
   markAllRead: async () => {
     await api.markAllNotificationsRead();
+    syncBadge(0);
     set((state) => ({
       notifications: state.notifications.map((n) => ({ ...n, isRead: true })),
       unreadCount: 0,
@@ -119,11 +146,14 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     await api.deleteNotification(id);
     set((state) => {
       const removed = state.notifications.find((n) => n.id === id);
+      const unreadCount =
+        removed && !removed.isRead
+          ? Math.max(0, state.unreadCount - 1)
+          : state.unreadCount;
+      syncBadge(unreadCount);
       return {
         notifications: state.notifications.filter((n) => n.id !== id),
-        unreadCount: removed && !removed.isRead
-          ? Math.max(0, state.unreadCount - 1)
-          : state.unreadCount,
+        unreadCount,
       };
     });
   },
@@ -143,9 +173,11 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         return n;
       });
       const decrement = count > 0 ? count : cleared;
+      const unreadCount = Math.max(0, state.unreadCount - decrement);
+      syncBadge(unreadCount);
       return {
         notifications,
-        unreadCount: Math.max(0, state.unreadCount - decrement),
+        unreadCount,
       };
     });
   },
@@ -154,14 +186,24 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     get().refresh();
     get().refreshFriendStats();
 
-    const bumpUnread = () => {
-      set((state) => ({ unreadCount: state.unreadCount + 1 }));
+    const bumpUnread = (payload?: { conversationId?: string }) => {
+      const active = getActiveConversation();
+      if (payload?.conversationId && active === payload.conversationId) {
+        return;
+      }
+      set((state) => {
+        const unreadCount = state.unreadCount + 1;
+        syncBadge(unreadCount);
+        return { unreadCount };
+      });
+      triggerFeedback('notification').catch(() => {});
       scheduleRefresh(() => get().refresh());
     };
 
     const unsubs = [
-      socketService.on('notification:new', () => {
-        bumpUnread();
+      socketService.on('notification:new', (data: unknown) => {
+        const payload = data as { conversationId?: string };
+        bumpUnread(payload);
         scheduleStatsRefresh(() => get().refreshFriendStats());
       }),
       socketService.on('friend:request', () => {

@@ -30,22 +30,38 @@ export function getRedis(): Redis | null {
   return redis;
 }
 
+export interface CacheEnvelope<T> {
+  v: number;
+  updatedAt: string;
+  data: T;
+}
+
 export const CacheKeys = {
   user: (id: string) => `user:${id}`,
   userFriends: (id: string) => `friends:${id}`,
   conversation: (id: string) => `conversation:${id}`,
   userConversations: (id: string) => `conversations:${id}`,
   messages: (conversationId: string) => `messages:${conversationId}`,
+  pinnedMessages: (conversationId: string) => `pins:${conversationId}`,
+  starredMessages: (userId: string) => `stars:${userId}`,
   notifications: (userId: string) => `notifications:${userId}`,
+  notificationCount: (userId: string) => `notifications:count:${userId}`,
+  universities: 'static:universities',
+  avatars: 'static:avatars',
   onlineUsers: 'online:users',
+  version: (key: string) => `${key}:version`,
 };
 
 export const CacheTTL = {
   user: 3600,
   friends: 1800,
   conversation: 1800,
+  conversations: 900,
   messages: 900,
+  pins: 900,
+  stars: 900,
   notifications: 600,
+  static: 86400,
   online: 300,
 };
 
@@ -110,11 +126,41 @@ export async function cacheSet(key: string, value: unknown, ttl?: number): Promi
   }
 }
 
+export async function cacheGetVersioned<T>(
+  key: string
+): Promise<{ data: T; version: number } | null> {
+  const envelope = await cacheGet<CacheEnvelope<T>>(key);
+  if (!envelope || envelope.data === undefined) return null;
+  return { data: envelope.data, version: envelope.v };
+}
+
+export async function cacheSetVersioned<T>(
+  key: string,
+  data: T,
+  ttl: number
+): Promise<number> {
+  const version = Date.now();
+  const envelope: CacheEnvelope<T> = {
+    v: version,
+    updatedAt: new Date(version).toISOString(),
+    data,
+  };
+  await cacheSet(key, envelope, ttl);
+  await cacheSet(CacheKeys.version(key), version, ttl);
+  return version;
+}
+
+export async function cacheGetVersion(key: string): Promise<number | null> {
+  const v = await cacheGet<number>(CacheKeys.version(key));
+  return typeof v === 'number' ? v : null;
+}
+
 export async function cacheDel(...keys: string[]): Promise<void> {
   try {
     const client = getRedis();
     if (!client || keys.length === 0) return;
-    await client.del(...keys);
+    const versionKeys = keys.map((k) => CacheKeys.version(k));
+    await client.del(...keys, ...versionKeys);
   } catch {
     // cache optional
   }
@@ -124,8 +170,20 @@ export async function cacheInvalidatePattern(pattern: string): Promise<void> {
   try {
     const client = getRedis();
     if (!client) return;
-    const keys = await client.keys(pattern);
-    if (keys.length > 0) await client.del(...keys);
+
+    let cursor = '0';
+    const keysToDelete: string[] = [];
+
+    do {
+      const [nextCursor, keys] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      keysToDelete.push(...keys);
+    } while (cursor !== '0');
+
+    if (keysToDelete.length > 0) {
+      const versionKeys = keysToDelete.map((k) => CacheKeys.version(k));
+      await client.del(...keysToDelete, ...versionKeys);
+    }
   } catch {
     // cache optional
   }

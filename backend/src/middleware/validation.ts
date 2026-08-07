@@ -1,13 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodSchema } from 'zod';
+import { formatValidationErrors } from '../modules/auth/auth.validation';
 
 export function validateBody<T>(schema: ZodSchema<T>) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const result = schema.safeParse(req.body);
+    const result = schema.safeParse(req.body ?? {});
     if (!result.success) {
+      const fieldErrors = result.error.flatten().fieldErrors;
       res.status(400).json({
-        error: 'Validation failed',
-        details: result.error.flatten().fieldErrors,
+        error: formatValidationErrors(fieldErrors),
+        code: 'VALIDATION_ERROR',
+        details: fieldErrors,
       });
       return;
     }

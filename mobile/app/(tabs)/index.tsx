@@ -16,7 +16,7 @@ import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
-import { cacheData, getCachedData } from '../../src/services/storage';
+import { cacheManager, CacheDomain } from '../../src/cache';
 import { NotificationBell } from '../../src/components/NotificationPanel';
 import {
   formatConversationTime,
@@ -68,22 +68,22 @@ export default function HomeScreen() {
   const locale = language === 'sw' ? 'sw-KE' : undefined;
 
   const loadConversations = useCallback(async () => {
-    try {
-      const cached = await getCachedData<Conversation[]>('conversations');
-      if (cached?.length) setConversations(sortConversations(cached));
-
-      const result = await api.getConversations() as { conversations: Conversation[] };
-      const sorted = sortConversations(result.conversations || []);
-      setConversations(sorted);
-      await cacheData('conversations', sorted);
-    } catch {
-      // Keep showing cached conversations if network/DB fails
-      const cached = await getCachedData<Conversation[]>('conversations').catch(() => null);
-      if (cached?.length) setConversations(sortConversations(cached));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    await cacheManager.loadWithRefresh<Conversation[]>(
+      CacheDomain.CONVERSATIONS,
+      async () => {
+        const result = await api.getConversations() as {
+          conversations: Conversation[];
+          cacheVersion?: number;
+        };
+        return {
+          data: sortConversations(result.conversations || []),
+          cacheVersion: result.cacheVersion,
+        };
+      },
+      (data) => setConversations(data)
+    );
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
   const applyConversationUpdate = useCallback(
@@ -129,15 +129,16 @@ export default function HomeScreen() {
   useEffect(() => {
     loadConversations();
 
-    const unsub1 = socketService.on('conversation:updated', (data: ConversationUpdatePayload) => {
-      applyConversationUpdate(data);
+    const unsub1 = socketService.on('conversation:updated', (data: unknown) => {
+      applyConversationUpdate(data as ConversationUpdatePayload);
     });
-    const unsubUpdate = socketService.on('conversation:update', (data: ConversationUpdatePayload) => {
-      applyConversationUpdate(data);
+    const unsubUpdate = socketService.on('conversation:update', (data: unknown) => {
+      applyConversationUpdate(data as ConversationUpdatePayload);
     });
-    const unsub2 = socketService.on('message:new', (data: { conversationId: string }) => {
-      if (data.conversationId) {
-        applyConversationUpdate({ conversationId: data.conversationId });
+    const unsub2 = socketService.on('message:new', (data: unknown) => {
+      const payload = data as { conversationId?: string };
+      if (payload.conversationId) {
+        applyConversationUpdate({ conversationId: payload.conversationId });
       }
     });
 

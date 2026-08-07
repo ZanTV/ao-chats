@@ -1,7 +1,7 @@
 import { prisma } from '../../config/database';
 import {
-  cacheGet,
-  cacheSet,
+  cacheGetVersioned,
+  cacheSetVersioned,
   cacheDel,
   CacheKeys,
   CacheTTL,
@@ -10,6 +10,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { ALL_AVATARS } from '../../config';
 import { normalizeMobileNumber } from './user.validation';
 import { friendService } from '../friends/friend.service';
+import { registerPushToken, unregisterPushToken } from '../../services/push.service';
 
 /** Full profile — owner only (includes private fields) */
 const ownerProfileSelect = {
@@ -51,8 +52,10 @@ const publicProfileSelect = {
 export class UserService {
   async getProfile(userId: string) {
     const cacheKey = `${CacheKeys.user(userId)}:owner`;
-    const cached = await cacheGet<Record<string, unknown>>(cacheKey);
-    if (cached) return cached;
+    const cached = await cacheGetVersioned<Record<string, unknown>>(cacheKey);
+    if (cached?.data) {
+      return { ...cached.data, cacheVersion: cached.version };
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -60,8 +63,8 @@ export class UserService {
     });
 
     if (!user) throw new AppError(404, 'User not found');
-    await cacheSet(cacheKey, user, CacheTTL.user);
-    return user;
+    const cacheVersion = await cacheSetVersioned(cacheKey, user, CacheTTL.user);
+    return { ...user, cacheVersion };
   }
 
   async updateProfile(
@@ -203,6 +206,16 @@ export class UserService {
     });
     const available = !existing || existing.id === excludeUserId;
     return { available };
+  }
+
+  async registerPushToken(userId: string, token: string, platform?: string) {
+    await registerPushToken(userId, token, platform);
+    return { success: true };
+  }
+
+  async unregisterPushToken(userId: string, token: string) {
+    await unregisterPushToken(userId, token);
+    return { success: true };
   }
 }
 

@@ -13,8 +13,8 @@ router.use(authenticate);
 router.get(
   '/',
   asyncHandler(async (req: AuthRequest, res) => {
-    const conversations = await conversationService.getUserConversations(req.userId!);
-    res.json({ conversations });
+    const result = await conversationService.getUserConversations(req.userId!);
+    res.json(result);
   })
 );
 

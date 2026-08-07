@@ -27,6 +27,7 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useNotificationStore, AppNotification } from '../stores/notificationStore';
 import { api } from '../services/api';
 import { Spacing, BorderRadius } from '../theme';
+import { clampOpacity } from '../utils/reanimatedColors';
 
 const COLLAPSED_RATIO = 0.58;
 const SPRING = { damping: 22, stiffness: 220 };
@@ -159,11 +160,13 @@ export function NotificationPanel() {
   }));
 
   const overlayStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      sheetHeight.value,
-      [collapsedHeight, expandedHeight],
-      [1, 0],
-      Extrapolation.CLAMP
+    opacity: clampOpacity(
+      interpolate(
+        sheetHeight.value,
+        [collapsedHeight, expandedHeight],
+        [1, 0],
+        Extrapolation.CLAMP
+      )
     ),
   }));
 
@@ -352,7 +355,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   sheet: {

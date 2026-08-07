@@ -1,14 +1,13 @@
 import { config } from './index';
 
 export function parseCorsOrigins(): string | string[] {
-  const raw =
-    process.env.SOCKET_CORS_ORIGIN ||
-    process.env.CORS_ORIGIN ||
-    process.env.CLIENT_URL;
+  const raw = config.socketCorsOrigin;
 
   if (!raw) {
-    if (config.nodeEnv === 'production') {
-      return ['https://www.aochats.chat', 'https://aochats.chat'];
+    if (config.isProduction) {
+      throw new Error(
+        'Missing SOCKET_CORS_ORIGIN (or CORS_ORIGIN / CLIENT_URL) in production'
+      );
     }
     return '*';
   }

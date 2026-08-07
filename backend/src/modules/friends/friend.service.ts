@@ -1,5 +1,11 @@
 import { prisma } from '../../config/database';
-import { cacheDel, CacheKeys } from '../../config/redis';
+import {
+  cacheDel,
+  cacheGetVersioned,
+  cacheSetVersioned,
+  CacheKeys,
+  CacheTTL,
+} from '../../config/redis';
 import { AppError } from '../../middleware/errorHandler';
 import { notificationService } from '../notifications/notification.service';
 import { getIO } from '../../sockets';
@@ -134,6 +140,12 @@ export class FriendService {
   }
 
   async getFriends(userId: string) {
+    const cacheKey = CacheKeys.userFriends(userId);
+    const cached = await cacheGetVersioned<unknown[]>(cacheKey);
+    if (cached?.data) {
+      return { friends: cached.data, cacheVersion: cached.version };
+    }
+
     const friendships = await prisma.friendship.findMany({
       where: { OR: [{ user1Id: userId }, { user2Id: userId }] },
       include: {
@@ -152,7 +164,9 @@ export class FriendService {
       },
     });
 
-    return friendships.map((f) => (f.user1Id === userId ? f.user2 : f.user1));
+    const friends = friendships.map((f) => (f.user1Id === userId ? f.user2 : f.user1));
+    const cacheVersion = await cacheSetVersioned(cacheKey, friends, CacheTTL.friends);
+    return { friends, cacheVersion };
   }
 
   async getPendingRequests(userId: string) {

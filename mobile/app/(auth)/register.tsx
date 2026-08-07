@@ -83,7 +83,7 @@ export default function RegisterScreen() {
   useEffect(() => {
     if (password.length >= 4) {
       api.checkPasswordStrength(password)
-        .then(setPasswordStrength)
+        .then((result) => setPasswordStrength(result as { score: number; label: string }))
         .catch(() => setPasswordStrength(getLocalPasswordStrength(password)));
     }
   }, [password]);
@@ -163,9 +163,9 @@ export default function RegisterScreen() {
           username: username.trim().toLowerCase(),
           email: email.trim().toLowerCase(),
           password,
-          university,
+          university: university.trim() || 'Other',
           course: course.trim() || undefined,
-          avatarId,
+          avatarId: avatarId || 'avatar-1',
         });
         startCodeTimer(5);
         setStep(5);
@@ -173,7 +173,7 @@ export default function RegisterScreen() {
         const message = err instanceof Error ? err.message : t.common.error;
         setFormError(message);
         if (Platform.OS !== 'web') {
-          Alert.alert('Registration Error', message);
+          Alert.alert('Could not create account', message);
         }
       } finally {
         setLoading(false);

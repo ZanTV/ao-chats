@@ -21,6 +21,7 @@ import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useNotificationStore } from '../../src/stores/notificationStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
+import { cacheManager, CacheDomain } from '../../src/cache';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 interface Friend {
@@ -49,10 +50,13 @@ interface SearchUser extends Friend {
   relationship?: Relationship;
 }
 
-type FriendSection =
-  | { key: 'pending_received'; title: string; data: FriendRequest[] }
-  | { key: 'pending_sent'; title: string; data: SentRequest[] }
-  | { key: 'friends'; title: string; data: Friend[] };
+type FriendListItem = FriendRequest | SentRequest | Friend;
+
+type FriendSection = {
+  key: 'pending_received' | 'pending_sent' | 'friends';
+  title: string;
+  data: readonly FriendListItem[];
+};
 
 export default function FriendsScreen() {
   const { colors, fonts, t } = useSettingsStore();
@@ -76,13 +80,23 @@ export default function FriendsScreen() {
   }, [friendsFocus, setFriendsFocus]);
 
   const loadData = useCallback(async () => {
+    await cacheManager.loadWithRefresh<Friend[]>(
+      CacheDomain.FRIENDS,
+      async () => {
+        const friendsRes = await api.getFriends() as {
+          friends: Friend[];
+          cacheVersion?: number;
+        };
+        return { data: friendsRes.friends || [], cacheVersion: friendsRes.cacheVersion };
+      },
+      (data) => setFriends(data)
+    );
+
     try {
-      const [friendsRes, requestsRes, sentRes] = await Promise.all([
-        api.getFriends(),
+      const [requestsRes, sentRes] = await Promise.all([
         api.getPendingRequests(),
         api.getSentRequests(),
       ]);
-      setFriends((friendsRes as { friends: Friend[] }).friends);
       setRequests((requestsRes as { requests: FriendRequest[] }).requests);
       setSentRequests((sentRes as { requests: SentRequest[] }).requests);
       await refreshFriendStats();
@@ -108,6 +122,7 @@ export default function FriendsScreen() {
       setSearchResults([]);
       return;
     }
+    cacheManager.addSearchQuery(q);
     try {
       const result = await api.searchUsers(q) as { users: SearchUser[] };
       setSearchResults(result.users);
@@ -356,7 +371,7 @@ export default function FriendsScreen() {
       )}
 
       {tab === 'friends' ? (
-        <SectionList
+        <SectionList<FriendListItem, FriendSection>
           sections={friendSections}
           keyExtractor={(item, index) => ('id' in item ? item.id : String(index))}
           renderItem={renderSectionItem}

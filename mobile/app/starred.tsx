@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettingsStore } from '../src/stores/settingsStore';
 import { useAuthStore } from '../src/stores/authStore';
+import { cacheManager, CacheDomain } from '../src/cache';
 import { api } from '../src/services/api';
 import { socketService } from '../src/services/socket';
 import { normalizeMessage, ChatMessage } from '../src/utils/messages';
@@ -38,11 +39,14 @@ export default function StarredScreen() {
   const [loading, setLoading] = useState(true);
 
   const loadStars = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await api.getStarredMessages() as { stars: StarEntry[] };
-      setStars(
-        (res.stars || []).map((s) => {
+    await cacheManager.loadWithRefresh<StarEntry[]>(
+      CacheDomain.STARRED,
+      async () => {
+        const res = await api.getStarredMessages() as {
+          stars: StarEntry[];
+          cacheVersion?: number;
+        };
+        const mapped = (res.stars || []).map((s) => {
           const raw = s.message as unknown as Record<string, unknown>;
           const sender = raw.sender as { firstName?: string } | undefined;
           return {
@@ -50,13 +54,12 @@ export default function StarredScreen() {
             message: normalizeMessage(raw),
             senderName: sender?.firstName,
           };
-        })
-      );
-    } catch {
-      // keep list
-    } finally {
-      setLoading(false);
-    }
+        });
+        return { data: mapped, cacheVersion: res.cacheVersion };
+      },
+      (data) => setStars(data)
+    );
+    setLoading(false);
   }, []);
 
   useEffect(() => {

@@ -1,57 +1,99 @@
-import dotenv from 'dotenv';
-dotenv.config();
+import './loadEnv';
+import {
+  formatValidationError,
+  validateEnvironment,
+  type EnvValidationResult,
+} from './validate';
+import { currentNodeEnv, loadedEnvFile } from './loadEnv';
 
-const nodeEnv = process.env.NODE_ENV || 'development';
+const nodeEnv = currentNodeEnv;
 const isProduction = nodeEnv === 'production';
 
-if (isProduction && !process.env.JWT_SECRET) {
-  throw new Error('JWT_SECRET is required in production');
+const validation = validateEnvironment(nodeEnv, loadedEnvFile);
+if (!validation.valid) {
+  throw new Error(formatValidationError(validation));
 }
 
-if (
-  isProduction &&
-  process.env.JWT_SECRET === 'your-super-secret-jwt-key-change-in-production'
-) {
-  throw new Error('JWT_SECRET must be changed from the default value in production');
+function env(name: string, fallback?: string): string {
+  const value = process.env[name]?.trim();
+  if (value) return value;
+  if (fallback !== undefined) return fallback;
+  throw new Error(`Missing required environment variable: ${name}`);
 }
+
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw?.trim()) return fallback;
+  const parsed = parseInt(raw, 10);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Environment variable ${name} must be a number (got: ${raw})`);
+  }
+  return parsed;
+}
+
+const port = envInt('PORT', 3001);
 
 export const config = {
-  port: parseInt(process.env.PORT || '3001', 10),
+  port,
   nodeEnv,
   isProduction,
-  databaseUrl: process.env.DATABASE_URL!,
-  redisUrl: process.env.REDIS_URL || (isProduction ? '' : 'redis://localhost:6379'),
+  databaseUrl: isProduction
+    ? env('DATABASE_URL')
+    : env('DATABASE_URL', 'postgresql://localhost:5432/aochats'),
+  redisUrl: isProduction
+    ? env('REDIS_URL')
+    : env('REDIS_URL', 'redis://localhost:6379'),
+  apiUrl: isProduction ? env('API_URL') : env('API_URL', `http://localhost:${port}`),
+  socketUrl: isProduction ? env('SOCKET_URL') : env('SOCKET_URL', `http://localhost:${port}`),
   jwt: {
-    secret: process.env.JWT_SECRET || 'dev-secret-change-me',
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
+    secret: isProduction ? env('JWT_SECRET') : env('JWT_SECRET', 'dev-secret-change-me'),
+    refreshSecret: isProduction
+      ? env('JWT_REFRESH_SECRET')
+      : env('JWT_REFRESH_SECRET', env('JWT_SECRET', 'dev-secret-change-me')),
+    expiresIn: env('JWT_EXPIRES_IN', '7d'),
+    refreshExpiresIn: env('JWT_REFRESH_EXPIRES_IN', '30d'),
   },
   smtp: {
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '587', 10),
-    user: process.env.SMTP_USER || '',
-    pass: process.env.SMTP_PASS || '',
-    from: process.env.EMAIL_FROM || 'AO Chats <noreply@aochats.com>',
+    host: isProduction ? env('SMTP_HOST') : env('SMTP_HOST', 'smtp.gmail.com'),
+    port: envInt('SMTP_PORT', 587),
+    user: isProduction ? env('SMTP_USER') : env('SMTP_USER', ''),
+    pass: isProduction ? env('SMTP_PASS') : env('SMTP_PASS', ''),
+    from: env('EMAIL_FROM', 'AO Chats <noreply@aochats.com>'),
   },
-  clientUrl: process.env.CLIENT_URL || 'https://www.aochats.chat',
-  corsOrigin: process.env.CORS_ORIGIN || process.env.CLIENT_URL || (isProduction ? 'https://www.aochats.chat' : '*'),
+  objectStorage: {
+    endpoint: process.env.OBJECT_STORAGE_ENDPOINT?.trim() || '',
+    bucket: process.env.OBJECT_STORAGE_BUCKET?.trim() || '',
+  },
+  clientUrl: isProduction
+    ? env('CLIENT_URL')
+    : env('CLIENT_URL', 'http://localhost:8081'),
+  corsOrigin:
+    process.env.CORS_ORIGIN?.trim() ||
+    process.env.CLIENT_URL?.trim() ||
+    (isProduction ? env('CLIENT_URL') : '*'),
   socketCorsOrigin:
-    process.env.SOCKET_CORS_ORIGIN ||
-    process.env.CORS_ORIGIN ||
-    process.env.CLIENT_URL ||
-    (isProduction ? 'https://www.aochats.chat' : '*'),
+    process.env.SOCKET_CORS_ORIGIN?.trim() ||
+    process.env.CORS_ORIGIN?.trim() ||
+    process.env.CLIENT_URL?.trim() ||
+    (isProduction ? env('CLIENT_URL') : '*'),
   rateLimit: {
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
-    max: parseInt(process.env.RATE_LIMIT_MAX || (isProduction ? '1000' : '500'), 10),
+    windowMs: envInt('RATE_LIMIT_WINDOW_MS', 900_000),
+    max: envInt('RATE_LIMIT_MAX', isProduction ? 1000 : 500),
   },
   maxPinnedMessages: 20,
-  verifyCodeExpiryMs: parseInt(process.env.VERIFY_CODE_EXPIRY_MINUTES || '5', 10) * 60 * 1000,
+  verifyCodeExpiryMs: envInt('VERIFY_CODE_EXPIRY_MINUTES', 5) * 60 * 1000,
   resendCodeCooldownMs: 60 * 1000,
 };
 
 export function isEmailConfigured(): boolean {
   return !!(config.smtp.user && config.smtp.pass);
 }
+
+export function getEnvironmentValidation(): EnvValidationResult {
+  return validateEnvironment(nodeEnv, loadedEnvFile);
+}
+
+export { loadedEnvFile, validation };
 
 export const UNIVERSITIES = [
   'University of Nairobi',

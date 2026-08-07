@@ -10,8 +10,14 @@ web-build/
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
 backend/.env
+backend/.env.development
+backend/.env.production
 mobile/.env
+mobile/.env.development
+mobile/.env.production
 
 # Logs
 *.log
@@ -44,6 +50,8 @@ backend/uploads/
 
 # Local test / scaffold (not production app)
 mobile/dist-test/
+mobile/dist-live-test/
+mobile/dist-verify/
 mobile/ao-chats/
 *.md.bak
 AO_PREMIUM_CHAT_REPORT.md

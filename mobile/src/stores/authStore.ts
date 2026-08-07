@@ -7,11 +7,12 @@ import {
   getAccessToken,
   cacheUser,
   getCachedUser,
+  clearCache,
 } from '../services/storage';
 import { socketService } from '../services/socket';
 import { ApiError } from '../utils/validation';
-import { withTimeout, INIT_TIMEOUT_MS } from '../services/config';
-
+import { INIT_TIMEOUT_MS, withTimeout } from '../services/config';
+import { isJwtExpired } from '../utils/jwt';
 export interface User {
   id: string;
   email: string;
@@ -46,9 +47,10 @@ interface AuthState {
   loadUser: () => Promise<boolean>;
 }
 
-async function persistUser(user: User) {
-  await cacheUser(user);
-  return user;
+async function persistUser(user: User & { cacheVersion?: number }) {
+  const { cacheVersion: _v, ...profile } = user;
+  await cacheUser(profile);
+  return profile;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -57,7 +59,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isLoading: true,
 
   login: async (email, password, rememberMe) => {
-    const result = await api.login(email, password, rememberMe) as {
+    const normalizedEmail = email.trim().toLowerCase();
+    const result = await api.login(normalizedEmail, password, rememberMe) as {
       user: User;
       accessToken: string;
       refreshToken: string;
@@ -99,23 +102,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     socketService.disconnect();
     await clearTokens();
+    await clearCache().catch(() => {});
     set({ user: null, isAuthenticated: false, isLoading: false });
   },
 
   initializeAuth: async () => {
     set({ isLoading: true });
     try {
-      const token = await withTimeout(getAccessToken(), 5000, null).catch(() => null);
+      const token = await getAccessToken();
       if (!token) {
         set({ user: null, isAuthenticated: false, isLoading: false });
         return;
       }
 
-      const cached = await withTimeout(getCachedUser<User>(), 5000, null).catch(() => null);
+      const cached = await getCachedUser<User>().catch(() => null);
       if (cached) {
         set({ user: cached, isAuthenticated: true, isLoading: false });
         socketService.connect().catch(() => {});
-        api.getProfile()
+        api.ensureValidSession()
+          .then(() => api.getProfile())
           .then(async (user) => {
             await persistUser(user as User);
             set({ user: user as User, isAuthenticated: true });
@@ -132,12 +137,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return;
       }
 
+      if (isJwtExpired(token)) {
+        const refreshed = await api.ensureValidSession();
+        if (!refreshed) {
+          await clearTokens();
+          set({ user: null, isAuthenticated: false, isLoading: false });
+          return;
+        }
+      }
+
       const user = await withTimeout(api.getProfile(), INIT_TIMEOUT_MS) as User;
       await persistUser(user);
       socketService.connect().catch(() => {});
       set({ user, isAuthenticated: true, isLoading: false });
-    } catch (err) {
-      const token = await getAccessToken().catch(() => null);
+    } catch (err) {      const token = await getAccessToken().catch(() => null);
       const cached = await getCachedUser<User>().catch(() => null);
       const isSessionExpired =
         err instanceof ApiError &&

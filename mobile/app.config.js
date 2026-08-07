@@ -1,5 +1,6 @@
 const APP_NAME = process.env.EXPO_PUBLIC_APP_NAME || 'AO Chats';
-const APP_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://www.aochats.chat';
+const IS_PRODUCTION =
+  process.env.EXPO_PUBLIC_ENV === 'production' || process.env.NODE_ENV === 'production';
 
 /** @type {import('expo/config').ExpoConfig} */
 module.exports = ({ config }) => ({
@@ -40,17 +41,24 @@ module.exports = ({ config }) => ({
       },
     ],
   },
-  plugins: ['expo-router', 'expo-secure-store', 'expo-asset'],
+  plugins: ['expo-router', 'expo-secure-store', 'expo-asset', 'expo-sqlite', 'expo-notifications'],
   experiments: {
     typedRoutes: true,
   },
   extra: {
     ...config.extra,
     appName: APP_NAME,
-    appUrl: APP_URL,
-    apiUrl: process.env.EXPO_PUBLIC_API_URL || 'https://api.aochats.chat/api',
-    socketUrl: process.env.EXPO_PUBLIC_SOCKET_URL || 'https://api.aochats.chat',
-    env: process.env.EXPO_PUBLIC_ENV || 'production',
+    appUrl: process.env.EXPO_PUBLIC_APP_URL || (IS_PRODUCTION ? undefined : 'http://localhost:8081'),
+    apiUrl:
+      process.env.EXPO_PUBLIC_API_URL ||
+      (IS_PRODUCTION ? undefined : 'http://localhost:3001/api'),
+    socketUrl:
+      process.env.EXPO_PUBLIC_SOCKET_URL ||
+      (IS_PRODUCTION ? undefined : 'http://localhost:3001'),
+    storageUrl:
+      process.env.EXPO_PUBLIC_STORAGE_URL ||
+      (IS_PRODUCTION ? undefined : process.env.EXPO_PUBLIC_APP_URL || 'http://localhost:8081'),
+    env: process.env.EXPO_PUBLIC_ENV || (IS_PRODUCTION ? 'production' : 'development'),
     eas: {
       ...config.extra?.eas,
       projectId: process.env.EAS_PROJECT_ID || '076c3503-03fd-484e-8c0e-ed618f4d5934',

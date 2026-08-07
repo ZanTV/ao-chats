@@ -1,5 +1,12 @@
 import { prisma } from '../../config/database';
-import { cacheGet, cacheSet, cacheDel, cacheInvalidatePattern, CacheKeys, CacheTTL } from '../../config/redis';
+import {
+  cacheGetVersioned,
+  cacheSetVersioned,
+  cacheDel,
+  cacheInvalidatePattern,
+  CacheKeys,
+  CacheTTL,
+} from '../../config/redis';
 import { AppError } from '../../middleware/errorHandler';
 import { config } from '../../config';
 import { sanitizeInput } from '../../middleware/validation';
@@ -101,18 +108,24 @@ export class MessageService {
     conversationId: string,
     userId: string,
     cursor?: string,
-    limit = 50
+    limit = 30
   ) {
     const participant = await prisma.participant.findUnique({
       where: { conversationId_userId: { conversationId, userId } },
     });
     if (!participant) throw new AppError(403, 'Not a participant');
 
-    const cacheKey = `${CacheKeys.messages(conversationId)}:${userId}`;
+    const cacheKey = `${CacheKeys.messages(conversationId)}:${userId}:latest`;
     if (!cursor) {
-      const cached = await cacheGet<unknown[]>(cacheKey);
-      if (cached && Array.isArray(cached) && cached.length > 0) {
-        return cached;
+      const cached = await cacheGetVersioned<unknown[]>(cacheKey);
+      if (cached?.data && Array.isArray(cached.data) && cached.data.length > 0) {
+        const oldest = cached.data[0] as { createdAt?: string };
+        return {
+          messages: cached.data,
+          nextCursor: oldest?.createdAt ?? null,
+          hasMore: cached.data.length >= limit,
+          cacheVersion: cached.version,
+        };
       }
     }
 
@@ -125,16 +138,20 @@ export class MessageService {
       },
       include: messageListInclude(userId),
       orderBy: { createdAt: 'desc' },
-      take: limit,
+      take: limit + 1,
     });
 
-    const result = messages.reverse();
+    const hasMore = messages.length > limit;
+    const page = hasMore ? messages.slice(0, limit) : messages;
+    const result = page.reverse();
+    const nextCursor = hasMore && result.length > 0 ? result[0].createdAt.toISOString() : null;
 
+    let cacheVersion: number | undefined;
     if (!cursor && result.length > 0) {
-      await cacheSet(cacheKey, result, CacheTTL.messages);
+      cacheVersion = await cacheSetVersioned(cacheKey, result, CacheTTL.messages);
     }
 
-    return result;
+    return { messages: result, nextCursor, hasMore, cacheVersion };
   }
 
   /** Load a window of messages centered on a target message (for jump-to). */
@@ -341,6 +358,7 @@ export class MessageService {
     });
 
     await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
+    await cacheDel(CacheKeys.starredMessages(userId));
     return star;
   }
 
@@ -350,11 +368,18 @@ export class MessageService {
 
     await prisma.starredMessage.deleteMany({ where: { userId, messageId } });
     await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
+    await cacheDel(CacheKeys.starredMessages(userId));
     return { message: 'Unstarred', conversationId: message.conversationId };
   }
 
   async getStarredMessages(userId: string) {
-    return prisma.starredMessage.findMany({
+    const cacheKey = CacheKeys.starredMessages(userId);
+    const cached = await cacheGetVersioned<unknown[]>(cacheKey);
+    if (cached?.data) {
+      return { stars: cached.data, cacheVersion: cached.version };
+    }
+
+    const stars = await prisma.starredMessage.findMany({
       where: { userId },
       include: {
         message: {
@@ -366,6 +391,8 @@ export class MessageService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    const cacheVersion = await cacheSetVersioned(cacheKey, stars, CacheTTL.stars);
+    return { stars, cacheVersion };
   }
 
   async promoteWaitingToSent(conversationId: string, recipientId: string) {
@@ -411,6 +438,7 @@ export class MessageService {
     });
 
     await cacheInvalidatePattern(`${CacheKeys.messages(conversationId)}:*`);
+    await cacheInvalidatePattern(`${CacheKeys.pinnedMessages(conversationId)}:*`);
     return pin;
   }
 
@@ -422,6 +450,7 @@ export class MessageService {
 
     await prisma.messagePin.deleteMany({ where: { messageId, conversationId } });
     await cacheInvalidatePattern(`${CacheKeys.messages(conversationId)}:*`);
+    await cacheInvalidatePattern(`${CacheKeys.pinnedMessages(conversationId)}:*`);
     return { message: 'Message unpinned' };
   }
 
@@ -431,7 +460,13 @@ export class MessageService {
     });
     if (!participant) throw new AppError(403, 'Not a participant');
 
-    return prisma.messagePin.findMany({
+    const cacheKey = `${CacheKeys.pinnedMessages(conversationId)}:${userId}`;
+    const cached = await cacheGetVersioned<unknown[]>(cacheKey);
+    if (cached?.data) {
+      return { pins: cached.data, cacheVersion: cached.version };
+    }
+
+    const pins = await prisma.messagePin.findMany({
       where: { conversationId },
       include: {
         message: {
@@ -443,6 +478,8 @@ export class MessageService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    const cacheVersion = await cacheSetVersioned(cacheKey, pins, CacheTTL.pins);
+    return { pins, cacheVersion };
   }
 
   async markDelivered(messageId: string) {

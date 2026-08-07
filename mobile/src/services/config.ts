@@ -1,35 +1,38 @@
 /**
  * Centralized environment configuration for AO Chats mobile.
- * Production uses EXPO_PUBLIC_* variables — no localhost in production builds.
+ * Production reads EXPO_PUBLIC_* only — no hardcoded production URLs.
  */
 
-const PRODUCTION = {
-  apiUrl: 'https://api.aochats.chat/api',
-  socketUrl: 'https://api.aochats.chat',
-  appUrl: 'https://www.aochats.chat',
-  env: 'production',
-} as const;
+const LOCALHOST_PATTERN = /localhost|127\.0\.0\.1/i;
 
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '');
 }
 
-function isProductionBuild(): boolean {
-  return (
-    process.env.EXPO_PUBLIC_ENV === 'production' ||
-    process.env.NODE_ENV === 'production'
+function missingEnv(name: string): never {
+  throw new Error(
+    `Missing required environment variable: ${name}. ` +
+      'Set it in mobile/.env.development (dev) or EAS/Vercel dashboard (production).'
   );
 }
 
+function requirePublicEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) missingEnv(name);
+  if (isProduction() && LOCALHOST_PATTERN.test(value)) {
+    throw new Error(`${name} must not use localhost in production (got: ${value})`);
+  }
+  return stripTrailingSlash(value);
+}
+
 function getDevApiUrl(): string {
-  // Expo Go / dev client: use LAN IP from Metro when available
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Constants = require('expo-constants').default;
     const hostUri = Constants.expoConfig?.hostUri as string | undefined;
     if (hostUri) {
       const host = hostUri.split(':')[0];
-      if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      if (host && !LOCALHOST_PATTERN.test(host)) {
         return `http://${host}:3001/api`;
       }
     }
@@ -46,7 +49,7 @@ function getDevSocketUrl(): string {
     const hostUri = Constants.expoConfig?.hostUri as string | undefined;
     if (hostUri) {
       const host = hostUri.split(':')[0];
-      if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      if (host && !LOCALHOST_PATTERN.test(host)) {
         return `http://${host}:3001`;
       }
     }
@@ -57,8 +60,10 @@ function getDevSocketUrl(): string {
 }
 
 export function getEnv(): string {
-  if (process.env.EXPO_PUBLIC_ENV) return process.env.EXPO_PUBLIC_ENV;
-  return __DEV__ ? 'development' : PRODUCTION.env;
+  if (process.env.EXPO_PUBLIC_ENV?.trim()) {
+    return process.env.EXPO_PUBLIC_ENV.trim();
+  }
+  return __DEV__ ? 'development' : 'production';
 }
 
 export function isProduction(): boolean {
@@ -66,31 +71,46 @@ export function isProduction(): boolean {
 }
 
 export function getApiUrl(): string {
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return stripTrailingSlash(process.env.EXPO_PUBLIC_API_URL);
+  if (isProduction()) {
+    return requirePublicEnv('EXPO_PUBLIC_API_URL');
   }
-  if (isProductionBuild() || !__DEV__) {
-    return PRODUCTION.apiUrl;
+  if (process.env.EXPO_PUBLIC_API_URL?.trim()) {
+    return stripTrailingSlash(process.env.EXPO_PUBLIC_API_URL.trim());
   }
   return getDevApiUrl();
 }
 
 export function getSocketUrl(): string {
-  if (process.env.EXPO_PUBLIC_SOCKET_URL) {
-    return stripTrailingSlash(process.env.EXPO_PUBLIC_SOCKET_URL);
+  if (isProduction()) {
+    return requirePublicEnv('EXPO_PUBLIC_SOCKET_URL');
   }
-  if (isProductionBuild() || !__DEV__) {
-    return PRODUCTION.socketUrl;
+  if (process.env.EXPO_PUBLIC_SOCKET_URL?.trim()) {
+    return stripTrailingSlash(process.env.EXPO_PUBLIC_SOCKET_URL.trim());
   }
   return getDevSocketUrl();
 }
 
 export function getAppUrl(): string {
-  return process.env.EXPO_PUBLIC_APP_URL || PRODUCTION.appUrl;
+  if (isProduction()) {
+    return requirePublicEnv('EXPO_PUBLIC_APP_URL');
+  }
+  return stripTrailingSlash(
+    process.env.EXPO_PUBLIC_APP_URL?.trim() || 'http://localhost:8081'
+  );
+}
+
+export function getStorageUrl(): string {
+  if (isProduction()) {
+    return requirePublicEnv('EXPO_PUBLIC_STORAGE_URL');
+  }
+  if (process.env.EXPO_PUBLIC_STORAGE_URL?.trim()) {
+    return stripTrailingSlash(process.env.EXPO_PUBLIC_STORAGE_URL.trim());
+  }
+  return getAppUrl();
 }
 
 export function getAppName(): string {
-  return process.env.EXPO_PUBLIC_APP_NAME || 'AO Chats';
+  return process.env.EXPO_PUBLIC_APP_NAME?.trim() || 'AO Chats';
 }
 
 export const INIT_TIMEOUT_MS = 12000;
@@ -118,4 +138,19 @@ export function withTimeout<T>(
         reject(err);
       });
   });
+}
+
+export function getVercelVariableChecklist(): { name: string; present: boolean }[] {
+  const keys = [
+    'EXPO_PUBLIC_API_URL',
+    'EXPO_PUBLIC_SOCKET_URL',
+    'EXPO_PUBLIC_APP_URL',
+    'EXPO_PUBLIC_STORAGE_URL',
+    'EXPO_PUBLIC_ENV',
+  ] as const;
+
+  return keys.map((name) => ({
+    name,
+    present: Boolean(process.env[name]?.trim()),
+  }));
 }

@@ -1,5 +1,11 @@
 import { prisma } from '../../config/database';
-import { cacheDel, CacheKeys } from '../../config/redis';
+import {
+  cacheDel,
+  cacheGetVersioned,
+  cacheSetVersioned,
+  CacheKeys,
+  CacheTTL,
+} from '../../config/redis';
 import { AppError } from '../../middleware/errorHandler';
 import { friendService } from '../friends/friend.service';
 import { messageService } from '../messages/message.service';
@@ -78,6 +84,12 @@ export class ConversationService {
   }
 
   async getUserConversations(userId: string) {
+    const cacheKey = CacheKeys.userConversations(userId);
+    const cached = await cacheGetVersioned<unknown[]>(cacheKey);
+    if (cached?.data?.length) {
+      return { conversations: cached.data, cacheVersion: cached.version };
+    }
+
     const participations = await prisma.participant.findMany({
       where: { userId },
       include: {
@@ -158,7 +170,9 @@ export class ConversationService {
       };
     });
 
-    return sortConversations(conversations);
+    const sorted = sortConversations(conversations);
+    const cacheVersion = await cacheSetVersioned(cacheKey, sorted, CacheTTL.conversations);
+    return { conversations: sorted, cacheVersion };
   }
 
   async getConversation(conversationId: string, userId: string) {

@@ -19,8 +19,8 @@ router.get(
 router.get(
   '/',
   asyncHandler(async (req: AuthRequest, res) => {
-    const friends = await friendService.getFriends(req.userId!);
-    res.json({ friends });
+    const result = await friendService.getFriends(req.userId!);
+    res.json(result);
   })
 );
 

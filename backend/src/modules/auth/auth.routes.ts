@@ -7,21 +7,35 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   refreshTokenSchema,
+  formatValidationErrors,
 } from './auth.validation';
 import { validateBody } from '../../middleware/validation';
 import { authenticate, AuthRequest } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/errorHandler';
 import { UNIVERSITIES, AVATAR_CATEGORIES } from '../../config';
+import { cacheGetVersioned, cacheSetVersioned, CacheKeys, CacheTTL } from '../../config/redis';
 import { paramId } from '../../utils/params';
 
 const router = Router();
 
-router.get('/universities', (_req, res) => {
-  res.json({ universities: UNIVERSITIES });
+router.get('/universities', async (_req, res) => {
+  const cached = await cacheGetVersioned<string[]>(CacheKeys.universities);
+  if (cached?.data) {
+    res.json({ universities: cached.data, cacheVersion: cached.version });
+    return;
+  }
+  const cacheVersion = await cacheSetVersioned(CacheKeys.universities, UNIVERSITIES, CacheTTL.static);
+  res.json({ universities: UNIVERSITIES, cacheVersion });
 });
 
-router.get('/avatars', (_req, res) => {
-  res.json({ categories: AVATAR_CATEGORIES });
+router.get('/avatars', async (_req, res) => {
+  const cached = await cacheGetVersioned<Record<string, string[]>>(CacheKeys.avatars);
+  if (cached?.data) {
+    res.json({ categories: cached.data, cacheVersion: cached.version });
+    return;
+  }
+  const cacheVersion = await cacheSetVersioned(CacheKeys.avatars, AVATAR_CATEGORIES, CacheTTL.static);
+  res.json({ categories: AVATAR_CATEGORIES, cacheVersion });
 });
 
 router.get(
@@ -47,11 +61,13 @@ router.post(
 router.post(
   '/register',
   asyncHandler(async (req, res) => {
-    const parsed = registerSchema.safeParse(req.body);
+    const parsed = registerSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
+      const fieldErrors = parsed.error.flatten().fieldErrors;
       res.status(400).json({
-        error: 'Validation failed',
-        details: parsed.error.flatten().fieldErrors,
+        error: formatValidationErrors(fieldErrors),
+        code: 'VALIDATION_ERROR',
+        details: fieldErrors,
       });
       return;
     }

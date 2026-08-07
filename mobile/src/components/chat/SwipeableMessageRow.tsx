@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ChatMessage } from '../../utils/messages';
 import { MessageBubble } from './MessageBubble';
 import { Spacing } from '../../theme';
+import { clampOpacity } from '../../utils/reanimatedColors';
 
 const SWIPE_THRESHOLD = 56;
 const MAX_SWIPE = 72;
@@ -21,12 +22,14 @@ interface ThemeColors {
   bubbleSentText: string;
   bubbleReceivedText: string;
   primary: string;
+  text: string;
   textSecondary: string;
   textTertiary: string;
   danger: string;
   warning: string;
   surface: string;
   surfaceSecondary?: string;
+  border?: string;
 }
 
 interface Props {
@@ -45,6 +48,7 @@ interface Props {
   onReactionPress?: (emoji: string) => void;
   currentUserId?: string;
   deletedLabel?: string;
+  compactBottom?: boolean;
 }
 
 export function SwipeableMessageRow(props: Props) {
@@ -72,14 +76,17 @@ export function SwipeableMessageRow(props: Props) {
     transform: [{ translateX: translateX.value }],
   }));
 
-  const replyHintStyle = useAnimatedStyle(() => ({
-    opacity: Math.min(translateX.value / SWIPE_THRESHOLD, 1),
-    transform: [{ scale: 0.8 + Math.min(translateX.value / SWIPE_THRESHOLD, 1) * 0.2 }],
-  }));
+  const replyHintStyle = useAnimatedStyle(() => {
+    const progress = clampOpacity(translateX.value / SWIPE_THRESHOLD);
+    return {
+      opacity: progress,
+      transform: [{ scale: 0.8 + progress * 0.2 }],
+    };
+  });
 
   return (
     <GestureDetector gesture={pan}>
-      <Animated.View style={[styles.row, rowStyle]}>
+      <Animated.View style={[styles.row, props.compactBottom && styles.rowCompact, rowStyle]}>
         <Animated.View style={[styles.replyHint, replyHintStyle]}>
           <Ionicons name="arrow-undo" size={20} color={props.colors.primary} />
         </Animated.View>
@@ -97,6 +104,7 @@ export function SwipeableMessageRow(props: Props) {
             onReactionPress={props.onReactionPress}
             currentUserId={props.currentUserId}
             deletedLabel={props.deletedLabel}
+            compactBottom={props.compactBottom}
           />
         </Pressable>
       </Animated.View>
@@ -106,6 +114,7 @@ export function SwipeableMessageRow(props: Props) {
 
 const styles = StyleSheet.create({
   row: { marginBottom: Spacing.sm, position: 'relative' },
+  rowCompact: { marginBottom: Spacing.xs },
   replyHint: {
     position: 'absolute',
     left: 0,

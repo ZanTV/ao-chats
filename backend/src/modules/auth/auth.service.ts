@@ -15,6 +15,7 @@ import { AppError } from '../../middleware/errorHandler';
 const userPublicSelect = {
   id: true,
   email: true,
+  emailVerified: true,
   username: true,
   firstName: true,
   lastName: true,
@@ -146,14 +147,27 @@ export class AuthService {
   }
 
   async login(email: string, password: string, deviceInfo?: string, ipAddress?: string) {
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (!user) throw new AppError(401, 'Invalid email or password');
 
     const valid = await comparePassword(password, user.passwordHash);
     if (!valid) throw new AppError(401, 'Invalid email or password');
 
     if (!user.emailVerified) {
-      throw new AppError(403, 'Please verify your email first', 'EMAIL_NOT_VERIFIED');
+      // User completed verification (codes cleared) but flag missing — repair legacy/broken rows
+      if (!user.emailVerifyCode && !user.emailVerifyExpiry) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { emailVerified: true },
+        });
+      } else {
+        throw new AppError(
+          403,
+          'Please verify your email first. Check your inbox for the 6-digit code or tap Resend on the verification screen.',
+          'EMAIL_NOT_VERIFIED'
+        );
+      }
     }
 
     const tokens = await this.createSession(user.id, user.email, deviceInfo, ipAddress);
@@ -167,6 +181,7 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
+        emailVerified: true,
         username: user.username,
         firstName: user.firstName,
         lastName: user.lastName,

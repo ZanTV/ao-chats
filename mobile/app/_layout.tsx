@@ -12,6 +12,8 @@ import { useNotificationStore } from '../src/stores/notificationStore';
 import { LoadingScreen } from '../src/components/LoadingScreen';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { NotificationPanel } from '../src/components/NotificationPanel';
+import { hydrateLocalCache } from '../src/cache';
+import { initializePushNotifications, unregisterPushNotifications } from '../src/services/pushService';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -41,15 +43,37 @@ export default function RootLayout() {
   const [appReady, setAppReady] = useState(false);
 
   useEffect(() => {
-    Promise.all([loadSettings(), initializeAuth()]).finally(() => {
-      setAppReady(true);
-    });
+    let cancelled = false;
+
+    (async () => {
+      await hydrateLocalCache();
+      if (cancelled) return;
+      await Promise.all([loadSettings(), initializeAuth()]);
+      if (!cancelled) setAppReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    return initializeNotifications();
+    let cleanupPush: (() => void) | undefined;
+    const cleanupNotifications = initializeNotifications();
+    initializePushNotifications().then((cleanup) => {
+      cleanupPush = cleanup;
+    });
+    return () => {
+      cleanupNotifications();
+      cleanupPush?.();
+    };
   }, [isAuthenticated, initializeNotifications]);
+
+  useEffect(() => {
+    if (isAuthenticated) return;
+    unregisterPushNotifications().catch(() => {});
+  }, [isAuthenticated]);
 
   const onLayoutRootView = useCallback(async () => {
     if (appReady && isLoaded && !isLoading) {

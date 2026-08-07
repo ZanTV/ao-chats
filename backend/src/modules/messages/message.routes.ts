@@ -20,8 +20,8 @@ router.use(authenticate);
 router.get(
   '/starred',
   asyncHandler(async (req: AuthRequest, res) => {
-    const stars = await messageService.getStarredMessages(req.userId!);
-    res.json({ stars });
+    const result = await messageService.getStarredMessages(req.userId!);
+    res.json(result);
   })
 );
 
@@ -43,13 +43,13 @@ router.get(
   '/:conversationId',
   asyncHandler(async (req: AuthRequest, res) => {
     const { cursor, limit } = req.query;
-    const messages = await messageService.getMessages(
+    const result = await messageService.getMessages(
       paramId(req.params.conversationId),
       req.userId!,
       cursor as string | undefined,
-      limit ? parseInt(limit as string) : 50
+      limit ? parseInt(limit as string, 10) : 30
     );
-    res.json({ messages, count: messages.length });
+    res.json(result);
   })
 );
 
@@ -192,11 +192,11 @@ router.delete(
 router.get(
   '/:conversationId/pins',
   asyncHandler(async (req: AuthRequest, res) => {
-    const pins = await messageService.getPinnedMessages(
+    const result = await messageService.getPinnedMessages(
       paramId(req.params.conversationId),
       req.userId!
     );
-    res.json({ pins });
+    res.json(result);
   })
 );
 

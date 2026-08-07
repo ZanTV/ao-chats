@@ -161,6 +161,11 @@ export const en = {
     aoManager: 'Chat with AO Manager',
     aoManagerDesc: 'Official AO Chats Support',
     aoManagerUnavailable: 'AO Manager is temporarily unavailable. Please try again.',
+    sounds: 'Sounds & Vibration',
+    chatSound: 'Chat Sound',
+    chatVibration: 'Chat Vibration',
+    notificationSound: 'Notification Sound',
+    notificationVibration: 'Notification Vibration',
   },
   common: {
     loading: 'Loading...',
@@ -339,6 +344,11 @@ export const sw: typeof en = {
     aoManager: 'Ongea na AO Manager',
     aoManagerDesc: 'Msaada Rasmi wa AO Chats',
     aoManagerUnavailable: 'AO Manager haipatikani kwa sasa. Jaribu tena.',
+    sounds: 'Sauti na Mtetemo',
+    chatSound: 'Sauti ya Mazungumzo',
+    chatVibration: 'Mtetemo wa Mazungumzo',
+    notificationSound: 'Sauti ya Arifa',
+    notificationVibration: 'Mtetemo wa Arifa',
   },
   common: {
     loading: 'Inapakia...',
