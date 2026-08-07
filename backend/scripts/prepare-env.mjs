@@ -1,8 +1,22 @@
 /**
- * Ensures Prisma env vars exist before `prisma generate` / `db push`.
+ * Ensures Prisma env vars exist before `prisma generate` / migrations.
  * Render/Railway build may run before runtime secrets are injected — use a placeholder
  * so schema validation passes; runtime uses real DATABASE_URL from the platform.
  */
+import dotenv from 'dotenv';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+for (const name of ['.env', '.env.development', '.env.production']) {
+  const file = path.join(root, name);
+  if (fs.existsSync(file)) {
+    dotenv.config({ path: file });
+    break;
+  }
+}
+
 const dbUrl = process.env.DATABASE_URL?.trim();
 
 if (!process.env.DATABASE_URL_UNPOOLED?.trim()) {

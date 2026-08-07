@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Switch } from 'react-native';
-import { router } from 'expo-router';
+import { router, Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/stores/authStore';
@@ -170,6 +170,19 @@ export default function SettingsScreen() {
             ) : (
               <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
             )}
+          </TouchableOpacity>
+        </Section>
+
+        <Section title={t.profile.education} colors={colors} fonts={fonts}>
+          <TouchableOpacity
+            style={[styles.linkRow, { borderBottomColor: colors.border }]}
+            onPress={() => router.push('/settings/universities' as Href)}
+          >
+            <Ionicons name="library-outline" size={22} color={colors.text} />
+            <Text style={[styles.linkText, { color: colors.text, fontSize: fonts.md }]}>
+              {t.settings.universitiesDirectory}
+            </Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
           </TouchableOpacity>
         </Section>
 

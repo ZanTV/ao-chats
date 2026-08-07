@@ -46,7 +46,7 @@ export const CacheKeys = {
   starredMessages: (userId: string) => `stars:${userId}`,
   notifications: (userId: string) => `notifications:${userId}`,
   notificationCount: (userId: string) => `notifications:count:${userId}`,
-  universities: 'static:universities',
+  universities: 'static:universities:tz-v1',
   avatars: 'static:avatars',
   onlineUsers: 'online:users',
   version: (key: string) => `${key}:version`,

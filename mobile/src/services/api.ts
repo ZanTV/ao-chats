@@ -187,7 +187,7 @@ class ApiClient {
     });
 
   getUniversities = () =>
-    this.request<{ universities: string[]; cacheVersion?: number }>('/auth/universities');
+    this.request<{ universities: string[]; options?: Array<{ name: string; abbreviation: string; location: string }>; cacheVersion?: number }>('/auth/universities');
 
   getAvatars = () =>
     this.request<{ categories: Record<string, string[]>; cacheVersion?: number }>('/auth/avatars');

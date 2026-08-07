@@ -24,11 +24,7 @@ await import('./prepare-env.mjs');
 
 try {
   await runNode('scripts/production-preflight.mjs', [], 'Production environment check');
-  await runNode(
-    'scripts/prisma-cli.mjs',
-    ['db', 'push', '--skip-generate', '--accept-data-loss'],
-    'Database schema sync (Prisma db push)'
-  );
+  await runNode('scripts/migrate-deploy.mjs', [], 'Database migrations (Prisma migrate deploy)');
 } catch (err) {
   console.error('\nDeploy aborted:', err.message);
   process.exit(1);

@@ -119,6 +119,7 @@ export default function RootLayout() {
               <Stack.Screen name="starred" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="profile/edit" options={{ animation: 'slide_from_bottom' }} />
               <Stack.Screen name="settings/blocked" options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="settings/universities" options={{ animation: 'slide_from_right' }} />
             </Stack>
           </AuthGuard>
         </GestureHandlerRootView>

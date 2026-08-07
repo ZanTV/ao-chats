@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../src/components/Avatar';
@@ -196,6 +196,16 @@ export default function ProfileScreen() {
         <ProfileSection title={t.profile.education} colors={colors} fonts={fonts}>
           <ProfileField icon="school-outline" label={t.auth.university} value={user.university || '—'} colors={colors} fonts={fonts} />
           <ProfileField icon="book-outline" label={t.auth.course} value={user.course || '—'} colors={colors} fonts={fonts} />
+          <TouchableOpacity
+            style={[styles.linkRow, { borderTopColor: colors.border }]}
+            onPress={() => router.push('/settings/universities' as Href)}
+          >
+            <Ionicons name="library-outline" size={20} color={colors.primary} />
+            <Text style={[styles.linkText, { color: colors.primary, fontSize: fonts.sm }]}>
+              {t.profile.viewAllUniversities}
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+          </TouchableOpacity>
         </ProfileSection>
 
         <ProfileSection title={t.profile.privateInfo} colors={colors} fonts={fonts}>
@@ -289,6 +299,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   secondaryActionText: { fontWeight: '600', fontSize: 16 },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingTop: Spacing.md,
+    marginTop: Spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  linkText: { flex: 1, fontWeight: '600' },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',

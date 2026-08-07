@@ -66,7 +66,7 @@ Update DNS (at your registrar):
 
 ## Step 4 — Deploy & verify
 
-Render deploys on every push to `main`. On each start, **`start-prod.mjs`** runs `prisma db push` **before** the API boots so PostgreSQL matches `prisma/schema.prisma` (e.g. `participants.cleared_at`, no `message_trash` table).
+Render deploys on every push to `main`. On each start, **`start-prod.mjs`** runs **`prisma migrate deploy`** before the API boots so PostgreSQL matches `prisma/migrations`.
 
 ```bash
 curl https://api.aochats.chat/health

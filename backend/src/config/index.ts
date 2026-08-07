@@ -107,19 +107,8 @@ export function getEnvironmentValidation(): EnvValidationResult {
 
 export { loadedEnvFile, validation };
 
-export const UNIVERSITIES = [
-  'University of Nairobi',
-  'Kenyatta University',
-  'Strathmore University',
-  'United States International University',
-  'Jomo Kenyatta University of Agriculture and Technology',
-  'Moi University',
-  'Egerton University',
-  'Maseno University',
-  'Technical University of Kenya',
-  'Dedan Kimathi University of Technology',
-  'Other',
-];
+export { UNIVERSITIES, UNIVERSITY_OPTIONS } from './universities';
+export type { UniversityOption } from './universities';
 
 export const AVATAR_CATEGORIES = {
   animals: ['avatar-1', 'avatar-2', 'avatar-3', 'avatar-4', 'avatar-5'],

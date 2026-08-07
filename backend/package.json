@@ -20,6 +20,7 @@
     "db:deploy": "node scripts/prisma-cli.mjs db push --skip-generate --accept-data-loss",
     "db:backfill-verified": "tsx scripts/backfill-email-verified.ts",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "node scripts/migrate-deploy.mjs",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio"
   },

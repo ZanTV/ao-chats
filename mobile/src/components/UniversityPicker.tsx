@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettingsStore } from '../stores/settingsStore';
-import { filterUniversities, getUniversityAbbreviations } from '../constants/signup';
+import { filterUniversities, getUniversityAbbreviations, getUniversityLocation } from '../constants/signup';
 import { BorderRadius, Spacing } from '../theme';
 
 interface UniversityPickerProps {
@@ -121,7 +121,7 @@ export function UniversityPicker({
               <TextInput
                 value={search}
                 onChangeText={setSearch}
-                placeholder="Search by name or abbreviation (e.g. UoN, JKUAT)"
+                placeholder="Search by name, abbreviation, or location (e.g. UDSM, Dodoma)"
                 placeholderTextColor={colors.textTertiary}
                 style={[styles.searchInput, { color: colors.text, fontSize: fonts.md }]}
                 autoCapitalize="none"
@@ -147,6 +147,7 @@ export function UniversityPicker({
               }
               renderItem={({ item }) => {
                 const abbrevs = getUniversityAbbreviations(item);
+                const location = getUniversityLocation(item);
                 const selected = value === item;
                 return (
                   <TouchableOpacity
@@ -169,9 +170,14 @@ export function UniversityPicker({
                       >
                         {item}
                       </Text>
-                      {abbrevs.length > 0 && item !== 'Other' ? (
-                        <Text style={{ color: colors.textTertiary, fontSize: fonts.xs, marginTop: 2 }}>
+                      {item !== 'Other' && abbrevs.length > 0 ? (
+                        <Text style={{ color: colors.textSecondary, fontSize: fonts.xs, marginTop: 2 }}>
                           {abbrevs.join(' · ')}
+                          {location ? ` · ${location}` : ''}
+                        </Text>
+                      ) : location && item === 'Other' ? (
+                        <Text style={{ color: colors.textTertiary, fontSize: fonts.xs, marginTop: 2 }}>
+                          {location}
                         </Text>
                       ) : null}
                     </View>

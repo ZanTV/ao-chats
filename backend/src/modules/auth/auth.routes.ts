@@ -12,7 +12,7 @@ import {
 import { validateBody } from '../../middleware/validation';
 import { authenticate, AuthRequest } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/errorHandler';
-import { UNIVERSITIES, AVATAR_CATEGORIES } from '../../config';
+import { UNIVERSITIES, UNIVERSITY_OPTIONS, AVATAR_CATEGORIES } from '../../config';
 import { cacheGetVersioned, cacheSetVersioned, CacheKeys, CacheTTL } from '../../config/redis';
 import { paramId } from '../../utils/params';
 
@@ -21,11 +21,15 @@ const router = Router();
 router.get('/universities', async (_req, res) => {
   const cached = await cacheGetVersioned<string[]>(CacheKeys.universities);
   if (cached?.data) {
-    res.json({ universities: cached.data, cacheVersion: cached.version });
+    res.json({
+      universities: cached.data,
+      options: UNIVERSITY_OPTIONS,
+      cacheVersion: cached.version,
+    });
     return;
   }
   const cacheVersion = await cacheSetVersioned(CacheKeys.universities, UNIVERSITIES, CacheTTL.static);
-  res.json({ universities: UNIVERSITIES, cacheVersion });
+  res.json({ universities: UNIVERSITIES, options: UNIVERSITY_OPTIONS, cacheVersion });
 });
 
 router.get('/avatars', async (_req, res) => {
