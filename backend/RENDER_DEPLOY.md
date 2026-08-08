@@ -66,7 +66,7 @@ Update DNS (at your registrar):
 
 ## Step 4 — Deploy & verify
 
-Render deploys on every push to `main`. The API **starts immediately** for health checks; migrations run **in the background** after boot so cold starts do not cause **502 Bad Gateway**. To run migrations manually: `node scripts/migrate-deploy.mjs`.
+Render deploys on every push to `main`. The API starts immediately; migrations run in the background after boot. **Do not** add `production-preflight` to the build command — it can fail the build and take the API offline (`502` / `no-deploy`).
 
 ```bash
 curl https://api.aochats.chat/health
