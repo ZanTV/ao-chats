@@ -5,7 +5,7 @@ nixPkgs = ["nodejs_20"]
 cmds = ["npm ci"]
 
 [phases.build]
-cmds = ["npm run build", "node scripts/migrate-deploy.mjs"]
+cmds = ["npm run build"]
 
 [start]
 cmd = "node scripts/start-prod.mjs"

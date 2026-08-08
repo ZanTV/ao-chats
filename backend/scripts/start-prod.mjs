@@ -19,6 +19,26 @@ function runNode(script, args = [], label = script) {
   });
 }
 
+function runMigrateInBackground() {
+  if (process.env.SKIP_MIGRATE_ON_START === 'true') {
+    console.log('Skipping background migration (SKIP_MIGRATE_ON_START=true)');
+    return;
+  }
+
+  console.log('\n→ Scheduling database migrations in background…');
+  const child = spawn('node', ['scripts/migrate-deploy.mjs'], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  child.on('exit', (code) => {
+    if (code === 0) {
+      console.log('✓ Background migrations finished');
+    } else {
+      console.error(`✗ Background migrations failed (exit ${code}) — API stays up; check logs`);
+    }
+  });
+}
+
 process.chdir(root);
 await import('./prepare-env.mjs');
 
@@ -29,22 +49,14 @@ try {
   process.exit(1);
 }
 
-// Migrations run during Render/Railway build (see render.yaml buildCommand).
-// Running migrate here blocks the health check and causes 502 on cold starts.
-if (process.env.RUN_MIGRATE_ON_START === 'true') {
-  try {
-    await runNode('scripts/migrate-deploy.mjs', [], 'Database migrations (Prisma migrate deploy)');
-  } catch (err) {
-    console.error('\nMigration on start failed:', err.message);
-    process.exit(1);
-  }
-}
-
+// Start API immediately so Render health checks pass (avoid 502 on cold start).
 console.log('\n→ Starting AO Chats API…');
 const server = spawn('node', ['dist/index.js'], {
   stdio: 'inherit',
   env: process.env,
 });
+
+setTimeout(runMigrateInBackground, 2000);
 
 server.on('exit', (exitCode, signal) => {
   if (signal) {

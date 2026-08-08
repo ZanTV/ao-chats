@@ -11,7 +11,7 @@
 | **Name** | `ao-chats-api` (or your choice) |
 | **Root Directory** | `backend` |
 | **Runtime** | Node |
-| **Build Command** | `npm install && npm run build && node scripts/migrate-deploy.mjs` |
+| **Build Command** | `npm install && npm run build` |
 | **Start Command** | `node scripts/start-prod.mjs` |
 | **Health Check Path** | `/health` |
 
@@ -66,7 +66,7 @@ Update DNS (at your registrar):
 
 ## Step 4 — Deploy & verify
 
-Render deploys on every push to `main`. **Migrations run during the build** (`migrate-deploy.mjs`) so the API can start immediately and pass health checks. Do not run migrations on every cold start — that causes **502 Bad Gateway** timeouts.
+Render deploys on every push to `main`. The API **starts immediately** for health checks; migrations run **in the background** after boot so cold starts do not cause **502 Bad Gateway**. To run migrations manually: `node scripts/migrate-deploy.mjs`.
 
 ```bash
 curl https://api.aochats.chat/health
