@@ -153,8 +153,8 @@ export function getAppName(): string {
   return process.env.EXPO_PUBLIC_APP_NAME?.trim() || 'AO Chats';
 }
 
-export const INIT_TIMEOUT_MS = 45000;
-export const API_TIMEOUT_MS = 45000;
+export const INIT_TIMEOUT_MS = 15000;
+export const API_TIMEOUT_MS = 25000;
 
 /** Wrap a promise with a timeout. Rejects if time expires (unless fallback is set). */
 export function withTimeout<T>(

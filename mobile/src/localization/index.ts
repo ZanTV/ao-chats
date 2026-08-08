@@ -69,6 +69,9 @@ export const en = {
     deleteAllMessage: 'This only removes chats from your list. Other users are not affected.',
     chatOptions: 'Chat options',
     deleteFailed: 'Could not delete chat. Please try again.',
+    loadChatsFailed: 'AO Chats is temporarily unable to load your chats. Please try again.',
+    sessionExpired: 'Your session has expired. Please log in again.',
+    syncing: 'Syncing…',
   },
   chat: {
     typeMessage: 'Type a message...',
@@ -302,6 +305,9 @@ export const sw: typeof en = {
     deleteAllMessage: 'Hii inaondoa mazungumzo kwenye orodha yako tu. Watumiaji wengine hawathiriki.',
     chatOptions: 'Chaguo za mazungumzo',
     deleteFailed: 'Imeshindwa kufuta mazungumzo. Jaribu tena.',
+    loadChatsFailed: 'Imeshindwa kupakia mazungumzo yako kwa sasa. Jaribu tena.',
+    sessionExpired: 'Kipindi chako kimeisha. Tafadhali ingia tena.',
+    syncing: 'Inalandanisha…',
   },
   chat: {
     typeMessage: 'Andika ujumbe...',

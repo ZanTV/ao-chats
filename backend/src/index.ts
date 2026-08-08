@@ -11,7 +11,7 @@ import { connectRedis, isRedisAvailable } from './config/redis';
 import { prisma } from './config/database';
 import { verifyEmailTransport } from './utils/email.utils';
 import { ensureAoManagerAccount } from './services/ao-manager.service';
-import { ensureProductionSchema, isAuthSchemaReady } from './database/schemaEnsure';
+import { ensureProductionSchema, isProductionSchemaReady } from './database/schemaEnsure';
 import { errorHandler } from './middleware/errorHandler';
 import { authLimiter, apiLimiter } from './middleware/rateLimit';
 import { setupSocketIO, setIO } from './sockets';
@@ -78,7 +78,7 @@ app.get('/health', async (_req, res) => {
   }
 
   const redisOk = isRedisAvailable();
-  const schemaReady = dbOk ? await isAuthSchemaReady() : false;
+  const schemaReady = dbOk ? await isProductionSchemaReady() : false;
   const payload = {
     success: dbOk && schemaReady,
     status: dbOk && schemaReady ? 'ok' : 'degraded',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useChatComposerStore } from '../../src/stores/chatComposerStore';
 import { api } from '../../src/services/api';
+import { ApiError } from '../../src/utils/validation';
 import { socketService } from '../../src/services/socket';
 import { cacheManager, CacheDomain } from '../../src/cache';
 import { NotificationBell } from '../../src/components/NotificationPanel';
@@ -29,6 +30,9 @@ import {
 } from '../../src/utils/conversation';
 import { useTypingStore } from '../../src/stores/typingStore';
 import { Spacing, BorderRadius } from '../../src/theme';
+import { perfAsync } from '../../src/utils/perfTimings';
+
+const CONVERSATIONS_REFRESH_MS = 30_000;
 
 interface Conversation {
   id: string;
@@ -78,27 +82,53 @@ export default function HomeScreen() {
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const lastFetchRef = useRef(0);
 
   const locale = language === 'sw' ? 'sw-KE' : undefined;
 
-  const loadConversations = useCallback(async () => {
-    await cacheManager.loadWithRefresh<Conversation[]>(
-      CacheDomain.CONVERSATIONS,
-      async () => {
-        const result = await api.getConversations() as {
-          conversations: Conversation[];
-          cacheVersion?: number;
-        };
-        return {
-          data: sortConversations(result.conversations || []),
-          cacheVersion: result.cacheVersion,
-        };
-      },
-      (data) => setConversations(data)
-    );
-    setLoading(false);
-    setRefreshing(false);
-  }, []);
+  const loadConversations = useCallback(async (options?: { background?: boolean }) => {
+    setLoadError(null);
+    const cached = cacheManager.get<Conversation[]>(CacheDomain.CONVERSATIONS);
+    if (cached?.data !== undefined) {
+      setConversations(sortConversations(cached.data));
+      setLoading(false);
+    }
+
+    if (options?.background && cached?.data !== undefined) {
+      setSyncing(true);
+    }
+
+    try {
+      const result = await perfAsync('GET /conversations', () =>
+        api.getConversations()
+      ) as {
+        conversations: Conversation[];
+        cacheVersion?: number;
+      };
+      const sorted = sortConversations(result.conversations || []);
+      cacheManager.set(CacheDomain.CONVERSATIONS, sorted, result.cacheVersion);
+      setConversations(sorted);
+      lastFetchRef.current = Date.now();
+    } catch (err) {
+      if (cached?.data === undefined) {
+        if (err instanceof ApiError && (err.code === 'UNAUTHORIZED' || err.message === 'Session expired')) {
+          setLoadError(t.home.sessionExpired);
+        } else if (err instanceof ApiError && err.code === 'NETWORK_ERROR') {
+          setLoadError(err.message);
+        } else if (err instanceof ApiError && (err.code === 'DB_ERROR' || err.code === 'INTERNAL_ERROR')) {
+          setLoadError(t.home.loadChatsFailed);
+        } else {
+          setLoadError(err instanceof Error ? err.message : t.home.loadChatsFailed);
+        }
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+      setSyncing(false);
+    }
+  }, [t]);
 
   const persistConversations = useCallback((list: Conversation[]) => {
     const sorted = sortConversations(list);
@@ -225,7 +255,10 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadAll();
-      loadConversations();
+      const elapsed = Date.now() - lastFetchRef.current;
+      if (elapsed > CONVERSATIONS_REFRESH_MS || lastFetchRef.current === 0) {
+        loadConversations({ background: true });
+      }
     }, [loadAll, loadConversations])
   );
 
@@ -423,6 +456,9 @@ export default function HomeScreen() {
           value={search}
           onChangeText={setSearch}
         />
+        {syncing ? (
+          <Text style={{ color: colors.textTertiary, fontSize: fonts.xs }}>{t.home.syncing}</Text>
+        ) : null}
       </View>
 
       <FlatList
@@ -439,7 +475,7 @@ export default function HomeScreen() {
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              loadConversations();
+              loadConversations({ background: true });
             }}
             tintColor={colors.primary}
           />
@@ -447,13 +483,29 @@ export default function HomeScreen() {
         ListEmptyComponent={
           !loading ? (
             <View style={styles.empty}>
-              <Ionicons name="chatbubbles-outline" size={64} color={colors.textTertiary} />
-              <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: fonts.md }]}>
-                {t.home.noChats}
-              </Text>
-              <Text style={[styles.emptySubtext, { color: colors.textTertiary, fontSize: fonts.sm }]}>
-                {t.home.startChat}
-              </Text>
+              {loadError ? (
+                <>
+                  <Ionicons name="cloud-offline-outline" size={64} color={colors.danger} />
+                  <Text style={[styles.emptyText, { color: colors.danger, fontSize: fonts.md }]}>
+                    {loadError}
+                  </Text>
+                  <TouchableOpacity onPress={() => { setLoading(true); loadConversations(); }}>
+                    <Text style={[styles.emptySubtext, { color: colors.primary, fontSize: fonts.sm }]}>
+                      {t.common.retry}
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="chatbubbles-outline" size={64} color={colors.textTertiary} />
+                  <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: fonts.md }]}>
+                    {t.home.noChats}
+                  </Text>
+                  <Text style={[styles.emptySubtext, { color: colors.textTertiary, fontSize: fonts.sm }]}>
+                    {t.home.startChat}
+                  </Text>
+                </>
+              )}
             </View>
           ) : null
         }

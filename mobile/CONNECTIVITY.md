@@ -52,8 +52,19 @@ If login returns `DB_ERROR`, production Neon is missing schema columns — run f
 
 ```bash
 node scripts/apply-schema-patch.mjs
+node scripts/check-schema-columns.mjs
 ```
 
+Required columns include `participants.cleared_at`, `participants.hidden_at`, `users.reset_attempts`, `messages.is_edited`.
+
+Missing `cleared_at` causes `GET /api/conversations` to return **500 DB_ERROR** while `/health` still shows database connected.
+
 Or redeploy backend (applies patches automatically on startup).
+
+## Performance
+
+- Chats list uses cache-first rendering — cached conversations show immediately, API refreshes in background.
+- App startup no longer waits for API warmup before opening.
+- Backend conversation list uses a single unread-count query instead of one query per chat.
 
 Web: open https://www.aochats.chat (prefer `www`).

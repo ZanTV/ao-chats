@@ -210,7 +210,13 @@ export default function ChatScreen() {
       applyMessages(mergeMessagesForLoad(local, remote, pending));
     } catch (err) {
       if (!messagesRef.current.length) {
-        setLoadError(err instanceof Error ? err.message : t.common.error);
+        const message =
+          err instanceof ApiError && (err.code === 'DB_ERROR' || err.code === 'INTERNAL_ERROR')
+            ? t.home.loadChatsFailed
+            : err instanceof Error
+              ? err.message
+              : t.common.error;
+        setLoadError(message);
       }
     } finally {
       setLoading(false);
@@ -366,15 +372,21 @@ export default function ChatScreen() {
       stickToBottomRef.current = true;
       setPendingBelowCount(0);
       setShowScrollDown(false);
-      setLoading(true);
       setActiveConversation(conversationId);
 
       const openChat = async () => {
-        await useChatComposerStore.getState().loadAll();
-        const draft = useChatComposerStore.getState().getDraft(conversationId);
+        const composerStore = useChatComposerStore.getState();
+        const hasLocalMessages = (await cacheManager.getLocalMessages(conversationId)).length > 0;
+        if (!hasLocalMessages) setLoading(true);
+
+        const [, draft] = await Promise.all([
+          composerStore.loadAll(),
+          Promise.resolve(composerStore.getDraft(conversationId)),
+        ]);
         if (draft) setInputText(draft);
-        await loadMessages();
-        await loadConversationMeta();
+
+        await Promise.all([loadMessages(), loadConversationMeta()]);
+
         if (!highlightParam) {
           scrollToLatest(false);
         }
@@ -383,7 +395,7 @@ export default function ChatScreen() {
         markConversationNotificationsRead(conversationId);
       };
 
-      openChat();
+      void openChat();
 
       return () => {
         if (draftSaveTimeout.current) clearTimeout(draftSaveTimeout.current);

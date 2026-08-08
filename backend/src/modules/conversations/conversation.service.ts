@@ -13,8 +13,9 @@ import { messageService } from '../messages/message.service';
 import { notificationService } from '../notifications/notification.service';
 import { getAoManagerId } from '../../services/ao-manager.service';
 import { formatMessagePreview, sortConversations } from '../../utils/conversation.utils';
+import { fetchUnreadCountsByConversation } from './unreadCounts';
 
-const participantUserSelect = {
+const listParticipantUserSelect = {
   id: true,
   username: true,
   firstName: true,
@@ -24,6 +25,10 @@ const participantUserSelect = {
   lastSeen: true,
   isVerified: true,
   isSystemAccount: true,
+} as const;
+
+const participantUserSelect = {
+  ...listParticipantUserSelect,
   bio: true,
 };
 
@@ -87,7 +92,7 @@ export class ConversationService {
   async getUserConversations(userId: string) {
     const cacheKey = CacheKeys.userConversations(userId);
     const cached = await cacheGetVersioned<unknown[]>(cacheKey);
-    if (cached?.data?.length) {
+    if (cached) {
       return { conversations: cached.data, cacheVersion: cached.version };
     }
 
@@ -97,7 +102,7 @@ export class ConversationService {
         conversation: {
           include: {
             participants: {
-              include: { user: { select: participantUserSelect } },
+              include: { user: { select: listParticipantUserSelect } },
             },
             messages: {
               where: {
@@ -116,25 +121,7 @@ export class ConversationService {
       },
     });
 
-    const unreadEntries = await Promise.all(
-      participations.map(async (p) => {
-        const count = await prisma.message.count({
-          where: {
-            conversationId: p.conversationId,
-            senderId: { not: userId },
-            createdAt: {
-              gt: p.clearedAt && p.lastReadAt
-                ? (p.lastReadAt > p.clearedAt ? p.lastReadAt : p.clearedAt)
-                : p.clearedAt ?? p.lastReadAt ?? new Date(0),
-            },
-            deletedForAll: false,
-            NOT: { deletedFor: { has: userId } },
-          },
-        });
-        return [p.conversationId, count] as const;
-      })
-    );
-    const unreadMap = new Map(unreadEntries);
+    const unreadMap = await fetchUnreadCountsByConversation(userId);
 
     const conversations = participations.map((p) => {
       const otherParticipant = p.conversation.participants.find((pp) => pp.userId !== userId);

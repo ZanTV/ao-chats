@@ -16,6 +16,7 @@ import { GlobalRealtimeListeners } from '../src/components/GlobalRealtimeListene
 import { hydrateLocalCache } from '../src/cache';
 import { initializePushNotifications, unregisterPushNotifications } from '../src/services/pushService';
 import { warmupApi } from '../src/services/apiHealth';
+import { perfMark, perfMeasure } from '../src/utils/perfTimings';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -48,18 +49,25 @@ export default function RootLayout() {
     let cancelled = false;
 
     (async () => {
+      perfMark('app-start');
       try {
         await hydrateLocalCache();
       } catch {
         // cache optional at startup
       }
       if (cancelled) return;
+
+      // Warm API in background — do not block first paint
+      void warmupApi();
+
       try {
-        await warmupApi();
+        perfMark('auth-start');
         await Promise.all([loadSettings(), initializeAuth()]);
+        perfMeasure('session restore', 'auth-start');
       } catch {
         // still allow app to open
       }
+      perfMeasure('app startup', 'app-start');
       if (!cancelled) setAppReady(true);
     })();
 
