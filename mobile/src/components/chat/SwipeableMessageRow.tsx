@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -7,14 +7,15 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { ChatMessage } from '../../utils/messages';
 import { MessageBubble } from './MessageBubble';
 import { Spacing } from '../../theme';
 import { clampOpacity } from '../../utils/reanimatedColors';
 
-const SWIPE_THRESHOLD = 48;
-const MAX_SWIPE = 72;
+const SWIPE_THRESHOLD = 52;
+const MAX_SWIPE = 76;
 
 interface ThemeColors {
   bubbleSent: string;
@@ -30,6 +31,9 @@ interface ThemeColors {
   surface: string;
   surfaceSecondary?: string;
   border?: string;
+  selectionRing?: string;
+  selectionOverlaySent?: string;
+  selectionOverlayReceived?: string;
 }
 
 interface Props {
@@ -54,66 +58,50 @@ interface Props {
   editedLabel?: string;
 }
 
-function MessageRowContent(props: Props) {
-  const tap = Gesture.Tap().onEnd(() => {
-    runOnJS(props.onPress)();
-  });
+function SwipeableMessageRowNative(props: Props) {
+  const translateX = useSharedValue(0);
+  const replyArmed = useSharedValue(false);
+
+  const fireReply = useCallback(() => {
+    props.onSwipeReply();
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+  }, [props]);
+
+  const pan = Gesture.Pan()
+    .activeOffsetX(22)
+    .failOffsetY([-12, 12])
+    .onUpdate((e) => {
+      if (e.translationX > 0) {
+        translateX.value = Math.min(e.translationX * 0.88, MAX_SWIPE);
+        replyArmed.value = translateX.value >= SWIPE_THRESHOLD;
+      } else if (e.translationX <= 0) {
+        translateX.value = 0;
+        replyArmed.value = false;
+      }
+    })
+    .onEnd((e) => {
+      if (e.translationX >= SWIPE_THRESHOLD) {
+        runOnJS(fireReply)();
+      }
+      translateX.value = withSpring(0, { damping: 22, stiffness: 280 });
+      replyArmed.value = false;
+    });
 
   const longPress = Gesture.LongPress()
     .minDuration(280)
-    .maxDistance(12)
+    .maxDistance(10)
     .onStart(() => {
       runOnJS(props.onLongPress)();
     });
 
+  const tap = Gesture.Tap().onEnd(() => {
+    runOnJS(props.onPress)();
+  });
+
   const touch = Gesture.Exclusive(longPress, tap);
-
-  return (
-    <GestureDetector gesture={touch}>
-      <View style={styles.pressWrap}>
-        <MessageBubble
-          message={props.message}
-          isOwn={props.isOwn}
-          isSelected={props.isSelected}
-          isPinned={props.isPinned}
-          isHighlighted={props.isHighlighted}
-          colors={props.colors}
-          fonts={props.fonts}
-          formatTime={props.formatTime}
-          onReplyPress={props.onReplyPress}
-          onReactionPress={props.onReactionPress}
-          currentUserId={props.currentUserId}
-          deletedLabel={props.deletedLabel}
-          compactBottom={props.compactBottom}
-          seeMoreLabel={props.seeMoreLabel}
-          seeLessLabel={props.seeLessLabel}
-          editedLabel={props.editedLabel}
-        />
-      </View>
-    </GestureDetector>
-  );
-}
-
-function SwipeableMessageRowNative(props: Props) {
-  const translateX = useSharedValue(0);
-  const triggered = useSharedValue(false);
-
-  const pan = Gesture.Pan()
-    .activeOffsetX(10)
-    .failOffsetY([-14, 14])
-    .onUpdate((e) => {
-      if (e.translationX > 0) {
-        translateX.value = Math.min(e.translationX * 0.9, MAX_SWIPE);
-        if (translateX.value >= SWIPE_THRESHOLD && !triggered.value) {
-          triggered.value = true;
-          runOnJS(props.onSwipeReply)();
-        }
-      }
-    })
-    .onEnd(() => {
-      translateX.value = withSpring(0, { damping: 20, stiffness: 260 });
-      triggered.value = false;
-    });
+  const composed = Gesture.Simultaneous(touch, pan);
 
   const rowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
@@ -123,17 +111,36 @@ function SwipeableMessageRowNative(props: Props) {
     const progress = clampOpacity(translateX.value / SWIPE_THRESHOLD);
     return {
       opacity: progress,
-      transform: [{ scale: 0.82 + progress * 0.18 }],
+      transform: [{ scale: 0.84 + progress * 0.16 }],
     };
   });
 
   return (
-    <GestureDetector gesture={pan}>
+    <GestureDetector gesture={composed}>
       <Animated.View style={[styles.row, props.compactBottom && styles.rowCompact, rowStyle]}>
         <Animated.View style={[styles.replyHint, replyHintStyle]}>
           <Ionicons name="arrow-undo" size={20} color={props.colors.primary} />
         </Animated.View>
-        <MessageRowContent {...props} />
+        <View style={styles.pressWrap}>
+          <MessageBubble
+            message={props.message}
+            isOwn={props.isOwn}
+            isSelected={props.isSelected}
+            isPinned={props.isPinned}
+            isHighlighted={props.isHighlighted}
+            colors={props.colors}
+            fonts={props.fonts}
+            formatTime={props.formatTime}
+            onReplyPress={props.onReplyPress}
+            onReactionPress={props.onReactionPress}
+            currentUserId={props.currentUserId}
+            deletedLabel={props.deletedLabel}
+            compactBottom={props.compactBottom}
+            seeMoreLabel={props.seeMoreLabel}
+            seeLessLabel={props.seeLessLabel}
+            editedLabel={props.editedLabel}
+          />
+        </View>
       </Animated.View>
     </GestureDetector>
   );
@@ -143,7 +150,7 @@ export function SwipeableMessageRow(props: Props) {
   if (Platform.OS === 'web') {
     return (
       <View style={[styles.row, props.compactBottom && styles.rowCompact]}>
-        <MessageRowContent {...props} />
+        <MessageBubble {...props} />
       </View>
     );
   }
@@ -157,13 +164,13 @@ const styles = StyleSheet.create({
   rowCompact: { marginBottom: Spacing.xs },
   replyHint: {
     position: 'absolute',
-    left: 0,
-    top: '40%',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    left: 4,
+    top: '38%',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(37,99,235,0.12)',
+    backgroundColor: 'rgba(37,99,235,0.14)',
   },
 });

@@ -32,6 +32,9 @@ interface ThemeColors {
   surface: string;
   surfaceSecondary?: string;
   border?: string;
+  selectionRing?: string;
+  selectionOverlaySent?: string;
+  selectionOverlayReceived?: string;
 }
 
 interface Props {
@@ -106,6 +109,10 @@ export function MessageBubble({
   const bubbleBg = isOwn ? colors.bubbleSent : colors.bubbleReceived;
   const textColor = isOwn ? colors.bubbleSentText : colors.bubbleReceivedText;
   const toggleLabelColor = isOwn ? 'rgba(255,255,255,0.92)' : colors.primary;
+  const selectionRing = colors.selectionRing || colors.primary;
+  const selectionOverlay = isOwn
+    ? colors.selectionOverlaySent || 'rgba(255,255,255,0.22)'
+    : colors.selectionOverlayReceived || colors.primary + '22';
 
   return (
     <Animated.View
@@ -121,12 +128,26 @@ export function MessageBubble({
           styles.bubble,
           { backgroundColor: bubbleBg },
           isOwn ? styles.bubbleOwn : styles.bubbleOther,
-          isSelected && { borderWidth: 2, borderColor: colors.primary },
+          isSelected && {
+            borderWidth: 2.5,
+            borderColor: selectionRing,
+            shadowColor: selectionRing,
+            shadowOpacity: 0.38,
+            shadowRadius: 8,
+            shadowOffset: { width: 0, height: 2 },
+            elevation: 6,
+          },
           isPinned && styles.pinnedBubble,
           message.isForwarded && styles.forwardedBubble,
           message.failed && { opacity: 0.65, borderWidth: 1, borderColor: colors.danger },
         ]}
       >
+        {isSelected ? (
+          <View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, styles.selectionOverlay, { backgroundColor: selectionOverlay }]}
+          />
+        ) : null}
         {message.replyTo && (
           <ReplyQuotePreview
             replyTo={message.replyTo}
@@ -228,6 +249,9 @@ const styles = StyleSheet.create({
   },
   bubbleOwn: { borderBottomRightRadius: 8 },
   bubbleOther: { borderBottomLeftRadius: 8 },
+  selectionOverlay: {
+    borderRadius: BorderRadius.xl,
+  },
   pinnedBubble: { borderTopWidth: 2, borderTopColor: 'rgba(251,191,36,0.5)' },
   forwardedBubble: { borderStyle: 'dashed', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
   forwardedLabel: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },

@@ -27,6 +27,10 @@ export const Colors = {
     draftText: '#6366F1',
     pressHighlight: 'rgba(37, 99, 235, 0.10)',
     inputBorder: '#D1D5DB',
+    selectionRing: '#1D4ED8',
+    selectionWrap: 'rgba(37, 99, 235, 0.14)',
+    selectionOverlaySent: 'rgba(255, 255, 255, 0.24)',
+    selectionOverlayReceived: 'rgba(37, 99, 235, 0.16)',
   },
   dark: {
     background: '#0F172A',
@@ -56,6 +60,10 @@ export const Colors = {
     draftText: '#A5B4FC',
     pressHighlight: 'rgba(96, 165, 250, 0.14)',
     inputBorder: '#475569',
+    selectionRing: '#93C5FD',
+    selectionWrap: 'rgba(96, 165, 250, 0.18)',
+    selectionOverlaySent: 'rgba(255, 255, 255, 0.16)',
+    selectionOverlayReceived: 'rgba(147, 197, 253, 0.22)',
   },
 };
 

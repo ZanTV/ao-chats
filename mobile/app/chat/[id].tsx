@@ -3,14 +3,16 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
+  FlatList as RNFlatList,
   TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
   Alert,
   ActivityIndicator,
+  BackHandler,
 } from 'react-native';
+import { FlatList as GHFlatList } from 'react-native-gesture-handler';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +28,7 @@ import { PinnedBar } from '../../src/components/chat/PinnedBar';
 import { PinnedHistorySheet, PinnedEntry } from '../../src/components/chat/PinnedHistorySheet';
 import { UnreadDivider } from '../../src/components/chat/UnreadDivider';
 import { NewMessagesButton } from '../../src/components/chat/NewMessagesButton';
+import { ActionMenuSheet } from '../../src/components/ActionMenuSheet';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useNotificationStore } from '../../src/stores/notificationStore';
@@ -46,6 +49,7 @@ import {
 import { applyStatusUpdate } from '../../src/utils/messageStatus';
 import { setActiveConversation } from '../../src/services/activeConversation';
 import { playIncomingChatFeedback, playOutgoingChatFeedback } from '../../src/services/feedbackService';
+import * as Haptics from 'expo-haptics';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 type Message = ChatMessage;
@@ -75,6 +79,8 @@ function normalizeId(id: string | string[] | undefined): string | undefined {
   if (!id) return undefined;
   return Array.isArray(id) ? id[0] : id;
 }
+
+const MessageList = Platform.OS === 'web' ? RNFlatList : GHFlatList;
 
 export default function ChatScreen() {
   const params = useLocalSearchParams<{ id: string; highlight?: string }>();
@@ -115,8 +121,9 @@ export default function ChatScreen() {
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
   const [pendingBelowCount, setPendingBelowCount] = useState(0);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [showChatMenu, setShowChatMenu] = useState(false);
 
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<RNFlatList<ListItem>>(null);
   const inputRef = useRef<TextInput>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const draftSaveTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -289,6 +296,27 @@ export default function ChatScreen() {
     setActionTarget(null);
   }, []);
 
+  const goBack = useCallback(() => {
+    if (selectionMode) {
+      clearSelection();
+      return;
+    }
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
+  }, [selectionMode, clearSelection]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      goBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [goBack]);
+
   const toggleSelect = (message: Message) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -302,6 +330,9 @@ export default function ChatScreen() {
   };
 
   const selectMessageForAction = (message: Message) => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    }
     setSelectedIds(new Set([message.id]));
     setSelectionMode(true);
     setActionTarget(message);
@@ -796,52 +827,60 @@ export default function ChatScreen() {
             const next = previous.filter((c) => c.id !== conversationId);
             cacheManager.set(CacheDomain.CONVERSATIONS, next);
             await api.hideConversation(conversationId);
-            router.back();
+            goBack();
           } catch (err) {
             Alert.alert(t.common.error, err instanceof Error ? err.message : t.home.deleteFailed);
           }
         },
       },
     ]);
-  }, [conversationId, t]);
+  }, [conversationId, goBack, t]);
 
   const handleClearChat = useCallback(() => {
     if (!conversationId) return;
-    Alert.alert(t.home.chatOptions, undefined, [
+    Alert.alert(t.chat.clearChat, t.chat.clearChatConfirm, [
+      { text: t.common.cancel, style: 'cancel' },
       {
         text: t.chat.clearChat,
-        onPress: () => {
-          Alert.alert(t.chat.clearChat, t.chat.clearChatConfirm, [
-            { text: t.common.cancel, style: 'cancel' },
-            {
-              text: t.chat.clearChat,
-              style: 'destructive',
-              onPress: async () => {
-                try {
-                  applyMessages([]);
-                  setPinnedMessages([]);
-                  setPinnedIds(new Set());
-                  setPinnedEntries([]);
-                  setShowUnreadDivider(false);
-                  setReplyTo(null);
-                  setEditingMessage(null);
-                  setEditText('');
-                  await cacheManager.clearConversationMessages(conversationId);
-                  useChatComposerStore.getState().clearDraft(conversationId);
-                  await api.clearConversation(conversationId);
-                } catch (err) {
-                  await loadMessages();
-                  Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
-                }
-              },
-            },
-          ]);
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            applyMessages([]);
+            setPinnedMessages([]);
+            setPinnedIds(new Set());
+            setPinnedEntries([]);
+            setShowUnreadDivider(false);
+            setReplyTo(null);
+            setEditingMessage(null);
+            setEditText('');
+            await cacheManager.clearConversationMessages(conversationId);
+            useChatComposerStore.getState().clearDraft(conversationId);
+            await api.clearConversation(conversationId);
+          } catch (err) {
+            await loadMessages();
+            Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
+          }
         },
       },
-      { text: t.home.deleteChat, style: 'destructive', onPress: handleDeleteChat },
-      { text: t.common.cancel, style: 'cancel' },
     ]);
-  }, [conversationId, applyMessages, handleDeleteChat, loadMessages, t]);
+  }, [conversationId, applyMessages, loadMessages, t]);
+
+  const chatMenuItems = useMemo(
+    () => [
+      {
+        key: 'clear',
+        label: t.chat.clearChat,
+        onPress: handleClearChat,
+      },
+      {
+        key: 'delete',
+        label: t.home.deleteChat,
+        destructive: true,
+        onPress: handleDeleteChat,
+      },
+    ],
+    [handleClearChat, handleDeleteChat, t]
+  );
 
   const primarySelected = getPrimarySelected();
   const hiddenActions: MessageAction[] = [];
@@ -923,6 +962,9 @@ export default function ChatScreen() {
     surface: colors.surface,
     surfaceSecondary: colors.surfaceSecondary,
     border: colors.border,
+    selectionRing: colors.selectionRing,
+    selectionOverlaySent: colors.selectionOverlaySent,
+    selectionOverlayReceived: colors.selectionOverlayReceived,
   };
 
   const formatTime = (dateStr: string) =>
@@ -954,7 +996,19 @@ export default function ChatScreen() {
       ) < 120_000;
 
     return (
-      <View style={isSelected ? [styles.selectedWrap, { backgroundColor: colors.primary + '08' }] : undefined}>
+      <View
+        style={
+          isSelected
+            ? [
+                styles.selectedWrap,
+                {
+                  backgroundColor: colors.selectionWrap,
+                  borderColor: colors.selectionRing + '55',
+                },
+              ]
+            : undefined
+        }
+      >
         <SwipeableMessageRow
           message={message}
           isOwn={isOwn}
@@ -986,7 +1040,7 @@ export default function ChatScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.chatHeader, { backgroundColor: colors.headerBackground, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => (selectionMode ? clearSelection() : router.back())} style={styles.backBtn}>
+        <TouchableOpacity onPress={goBack} style={styles.backBtn}>
           <Ionicons name={selectionMode ? 'close' : 'arrow-back'} size={24} color={colors.text} />
         </TouchableOpacity>
         {otherUser && !selectionMode && (
@@ -1002,7 +1056,11 @@ export default function ChatScreen() {
                   : isOtherTyping || isTyping ? t.chat.typing : otherUser.status === 'ONLINE' ? t.chat.online : t.chat.offline}
               </Text>
             </View>
-            <TouchableOpacity onPress={handleClearChat} style={styles.headerMenuBtn} accessibilityLabel={t.chat.clearChat}>
+            <TouchableOpacity
+              onPress={() => setShowChatMenu(true)}
+              style={styles.headerMenuBtn}
+              accessibilityLabel={t.home.chatOptions}
+            >
               <Ionicons name="ellipsis-vertical" size={22} color={colors.text} />
             </TouchableOpacity>
           </>
@@ -1057,7 +1115,7 @@ export default function ChatScreen() {
         </View>
       ) : (
         <View style={styles.listWrap}>
-        <FlatList
+        <MessageList
           ref={flatListRef}
           data={listData}
           style={styles.messageList}
@@ -1066,6 +1124,9 @@ export default function ChatScreen() {
             item.kind === 'divider' ? `divider-${index}` : item.message.id
           }
           contentContainerStyle={styles.messagesList}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           onScroll={(e) => {
             const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
             const atBottom =
@@ -1243,6 +1304,16 @@ export default function ChatScreen() {
         colors={colors}
         fonts={fonts}
       />
+
+      <ActionMenuSheet
+        visible={showChatMenu}
+        title={t.home.chatOptions}
+        items={chatMenuItems}
+        onClose={() => setShowChatMenu(false)}
+        cancelLabel={t.common.cancel}
+        colors={colors}
+        fonts={fonts}
+      />
     </SafeAreaView>
   );
 }
@@ -1279,7 +1350,13 @@ const styles = StyleSheet.create({
       : null),
   },
   listWrap: { flex: 1, position: 'relative', minHeight: 0 },
-  selectedWrap: { borderRadius: BorderRadius.md, marginHorizontal: -4, paddingHorizontal: 4 },
+  selectedWrap: {
+    borderRadius: BorderRadius.lg,
+    marginHorizontal: -6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+  },
   emptyChat: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
   inputBar: {
     flexDirection: 'row',

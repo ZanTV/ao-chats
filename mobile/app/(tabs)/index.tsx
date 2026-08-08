@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import { api } from '../../src/services/api';
 import { ApiError } from '../../src/utils/validation';
 import { socketService } from '../../src/services/socket';
 import { cacheManager, CacheDomain } from '../../src/cache';
+import { ActionMenuSheet } from '../../src/components/ActionMenuSheet';
 import { NotificationBell } from '../../src/components/NotificationPanel';
 import { AoMessageStatus } from '../../src/components/chat/AoMessageStatus';
 import {
@@ -84,6 +85,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [showHomeMenu, setShowHomeMenu] = useState(false);
   const lastFetchRef = useRef(0);
 
   const locale = language === 'sw' ? 'sw-KE' : undefined;
@@ -245,12 +247,21 @@ export default function HomeScreen() {
     ]);
   }, [conversations, persistConversations, t]);
 
-  const showHomeMenu = useCallback(() => {
-    Alert.alert(t.home.chatOptions, undefined, [
-      { text: t.home.deleteAll, style: 'destructive', onPress: handleDeleteAll },
-      { text: t.common.cancel, style: 'cancel' },
-    ]);
-  }, [handleDeleteAll, t]);
+  const showHomeMenuSheet = useCallback(() => {
+    setShowHomeMenu(true);
+  }, []);
+
+  const homeMenuItems = useMemo(
+    () => [
+      {
+        key: 'delete-all',
+        label: t.home.deleteAll,
+        destructive: true,
+        onPress: handleDeleteAll,
+      },
+    ],
+    [handleDeleteAll, t]
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -436,7 +447,7 @@ export default function HomeScreen() {
         </Text>
         <View style={styles.headerActions}>
           <TouchableOpacity
-            onPress={showHomeMenu}
+            onPress={showHomeMenuSheet}
             style={styles.headerMenuBtn}
             accessibilityLabel={t.home.chatOptions}
             hitSlop={8}
@@ -518,6 +529,16 @@ export default function HomeScreen() {
       >
         <Ionicons name="create-outline" size={28} color="#FFF" />
       </TouchableOpacity>
+
+      <ActionMenuSheet
+        visible={showHomeMenu}
+        title={t.home.chatOptions}
+        items={homeMenuItems}
+        onClose={() => setShowHomeMenu(false)}
+        cancelLabel={t.common.cancel}
+        colors={colors}
+        fonts={fonts}
+      />
     </SafeAreaView>
   );
 }
