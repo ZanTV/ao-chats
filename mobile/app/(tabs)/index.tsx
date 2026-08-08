@@ -8,6 +8,7 @@ import {
   TextInput,
   RefreshControl,
   Alert,
+  BackHandler,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +22,11 @@ import { ApiError } from '../../src/utils/validation';
 import { socketService } from '../../src/services/socket';
 import { cacheManager, CacheDomain } from '../../src/cache';
 import { ActionMenuSheet } from '../../src/components/ActionMenuSheet';
+import { ConfirmDialog } from '../../src/components/ConfirmDialog';
+import {
+  ConversationSelectionBar,
+  type ConversationListAction,
+} from '../../src/components/ConversationSelectionBar';
 import { NotificationBell } from '../../src/components/NotificationPanel';
 import { AoMessageStatus } from '../../src/components/chat/AoMessageStatus';
 import {
@@ -86,9 +92,56 @@ export default function HomeScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [showHomeMenu, setShowHomeMenu] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmAction, setConfirmAction] = useState<ConversationListAction | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const lastFetchRef = useRef(0);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionMode = selectedIds.size > 0;
 
   const locale = language === 'sw' ? 'sw-KE' : undefined;
+
+  const showToast = useCallback((message: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(message);
+    toastTimerRef.current = setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectedIds(new Set());
+    setConfirmAction(null);
+  }, []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const enterSelection = useCallback((id: string) => {
+    setSelectedIds(new Set([id]));
+  }, []);
+
+  const selectedConversations = useMemo(
+    () => conversations.filter((c) => selectedIds.has(c.id)),
+    [conversations, selectedIds]
+  );
+
+  const blockableSelected = useMemo(
+    () =>
+      selectedConversations.filter(
+        (c) => c.otherUser && !c.otherUser.isSystemAccount && c.otherUser.id !== user?.id
+      ),
+    [selectedConversations, user?.id]
+  );
 
   const loadConversations = useCallback(async (options?: { background?: boolean }) => {
     setLoadError(null);
@@ -190,42 +243,121 @@ export default function HomeScreen() {
     [loadConversations, removeConversationFromList]
   );
 
-  const confirmDeleteChat = useCallback(
-    (conversationId: string) => {
-      Alert.alert(t.home.deleteChatTitle, t.home.deleteChatMessage, [
-        { text: t.common.cancel, style: 'cancel' },
-        {
-          text: t.common.delete,
-          style: 'destructive',
-          onPress: async () => {
-            const previous = conversations;
-            removeConversationFromList(conversationId);
-            try {
-              await api.hideConversation(conversationId);
-            } catch {
-              persistConversations(previous);
-              Alert.alert(t.common.error, t.home.deleteFailed);
-            }
-          },
-        },
-      ]);
+  const runBulkHide = useCallback(
+    async (mode: 'remove' | 'delete') => {
+      const ids = Array.from(selectedIds);
+      if (ids.length === 0) return;
+      const previous = conversations;
+      const next = conversations.filter((c) => !selectedIds.has(c.id));
+      persistConversations(next);
+      try {
+        await Promise.all(ids.map((id) => api.hideConversation(id, { mode })));
+        exitSelectionMode();
+        if (mode === 'remove') {
+          showToast(
+            ids.length === 1
+              ? t.home.conversationsRemoved
+              : `${ids.length} ${t.home.conversationsRemovedMany}`
+          );
+        } else {
+          showToast(
+            ids.length === 1
+              ? t.home.conversationsDeleted
+              : `${ids.length} ${t.home.conversationsDeletedMany}`
+          );
+        }
+      } catch {
+        persistConversations(previous);
+        Alert.alert(
+          t.common.error,
+          mode === 'remove' ? t.home.removeFailed : t.home.deleteFailed
+        );
+      }
     },
-    [conversations, persistConversations, removeConversationFromList, t]
+    [conversations, exitSelectionMode, persistConversations, selectedIds, showToast, t]
   );
 
-  const showChatOptions = useCallback(
-    (item: Conversation) => {
-      Alert.alert(t.home.chatOptions, undefined, [
-        {
-          text: t.home.deleteChat,
-          style: 'destructive',
-          onPress: () => confirmDeleteChat(item.id),
-        },
-        { text: t.common.cancel, style: 'cancel' },
-      ]);
-    },
-    [confirmDeleteChat, t]
-  );
+  const runBulkBlock = useCallback(async () => {
+    const targets = blockableSelected;
+    if (targets.length === 0) {
+      exitSelectionMode();
+      return;
+    }
+    const previous = conversations;
+    const hideIds = new Set(targets.map((c) => c.id));
+    persistConversations(conversations.filter((c) => !hideIds.has(c.id)));
+    try {
+      await Promise.all(
+        targets.map(async (c) => {
+          if (!c.otherUser) return;
+          await api.blockUser(c.otherUser.id);
+          await api.hideConversation(c.id, { mode: 'remove' });
+        })
+      );
+      exitSelectionMode();
+      showToast(
+        targets.length === 1
+          ? t.home.usersBlocked
+          : `${targets.length} ${t.home.usersBlockedMany}`
+      );
+    } catch {
+      persistConversations(previous);
+      Alert.alert(t.common.error, t.home.blockFailed);
+    }
+  }, [
+    blockableSelected,
+    conversations,
+    exitSelectionMode,
+    persistConversations,
+    showToast,
+    t,
+  ]);
+
+  const handleSelectionAction = useCallback((action: ConversationListAction) => {
+    setConfirmAction(action);
+  }, []);
+
+  const handleConfirmAction = useCallback(async () => {
+    if (!confirmAction || actionBusy) return;
+    setActionBusy(true);
+    try {
+      if (confirmAction === 'remove') await runBulkHide('remove');
+      else if (confirmAction === 'delete') await runBulkHide('delete');
+      else if (confirmAction === 'block') await runBulkBlock();
+    } finally {
+      setActionBusy(false);
+      setConfirmAction(null);
+    }
+  }, [actionBusy, confirmAction, runBulkBlock, runBulkHide]);
+
+  const confirmDialogCopy = useMemo(() => {
+    const count = selectedIds.size;
+    if (confirmAction === 'delete') {
+      return {
+        title: count > 1 ? t.home.deleteSelectedTitle : t.home.deleteChatTitle,
+        message: count > 1 ? t.home.deleteSelectedMessage : t.home.deleteChatMessage,
+        confirmLabel: t.common.delete,
+        destructive: true,
+      };
+    }
+    if (confirmAction === 'remove') {
+      return {
+        title: count > 1 ? t.home.removeSelectedTitle : t.home.removeChatTitle,
+        message: count > 1 ? t.home.removeSelectedMessage : t.home.removeChatMessage,
+        confirmLabel: t.home.removeChat,
+        destructive: false,
+      };
+    }
+    if (confirmAction === 'block') {
+      return {
+        title: t.home.blockSelectedTitle,
+        message: t.home.blockSelectedMessage,
+        confirmLabel: t.friends.block,
+        destructive: true,
+      };
+    }
+    return null;
+  }, [confirmAction, selectedIds.size, t]);
 
   const handleDeleteAll = useCallback(() => {
     Alert.alert(t.home.deleteAllTitle, t.home.deleteAllMessage, [
@@ -236,8 +368,14 @@ export default function HomeScreen() {
         onPress: async () => {
           const previous = conversations;
           persistConversations([]);
+          exitSelectionMode();
           try {
             await api.hideAllConversations();
+            showToast(
+              previous.length === 1
+                ? t.home.conversationsDeleted
+                : `${previous.length || ''} ${t.home.conversationsDeletedMany}`.trim()
+            );
           } catch {
             persistConversations(previous);
             Alert.alert(t.common.error, t.home.deleteFailed);
@@ -245,7 +383,7 @@ export default function HomeScreen() {
         },
       },
     ]);
-  }, [conversations, persistConversations, t]);
+  }, [conversations, exitSelectionMode, persistConversations, showToast, t]);
 
   const showHomeMenuSheet = useCallback(() => {
     setShowHomeMenu(true);
@@ -270,7 +408,17 @@ export default function HomeScreen() {
       if (elapsed > CONVERSATIONS_REFRESH_MS || lastFetchRef.current === 0) {
         loadConversations({ background: true });
       }
-    }, [loadAll, loadConversations])
+
+      const onBack = () => {
+        if (selectedIds.size > 0) {
+          exitSelectionMode();
+          return true;
+        }
+        return false;
+      };
+      const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+      return () => sub.remove();
+    }, [loadAll, loadConversations, selectedIds.size, exitSelectionMode])
   );
 
   useEffect(() => {
@@ -346,6 +494,7 @@ export default function HomeScreen() {
     const listStatus = getListMessageStatus(item.lastMessage, user?.id || '');
     const timeSource = item.lastMessage?.createdAt || item.updatedAt;
     const isTypingPreview = typingConversations[item.id];
+    const isSelected = selectedIds.has(item.id);
     const previewColor =
       isTypingPreview
         ? colors.primary
@@ -357,12 +506,41 @@ export default function HomeScreen() {
 
     return (
       <TouchableOpacity
-        style={[styles.chatItem, { backgroundColor: colors.surface }]}
-        onPress={() => router.push(`/chat/${item.id}`)}
-        onLongPress={() => showChatOptions(item)}
-        delayLongPress={400}
+        style={[
+          styles.chatItem,
+          {
+            backgroundColor: isSelected ? colors.selectionWrap : colors.surface,
+            borderColor: isSelected ? colors.selectionRing : 'transparent',
+            borderWidth: isSelected ? 1.5 : 0,
+          },
+        ]}
+        onPress={() => {
+          if (selectionMode) {
+            toggleSelect(item.id);
+            return;
+          }
+          router.push(`/chat/${item.id}`);
+        }}
+        onLongPress={() => {
+          if (selectionMode) toggleSelect(item.id);
+          else enterSelection(item.id);
+        }}
+        delayLongPress={350}
         activeOpacity={0.7}
       >
+        {selectionMode ? (
+          <View
+            style={[
+              styles.selectMark,
+              {
+                borderColor: isSelected ? colors.primary : colors.border,
+                backgroundColor: isSelected ? colors.primary : 'transparent',
+              },
+            ]}
+          >
+            {isSelected ? <Ionicons name="checkmark" size={14} color="#FFF" /> : null}
+          </View>
+        ) : null}
         <Avatar
           avatarId={item.otherUser?.avatarId || 'avatar-30'}
           size={56}
@@ -414,7 +592,7 @@ export default function HomeScreen() {
             {item.isPinned && (
               <Ionicons name="pin" size={14} color={colors.primary} style={{ marginLeft: 4 }} />
             )}
-            {item.unreadCount > 0 && (
+            {item.unreadCount > 0 && !selectionMode && (
               <View style={[styles.badge, { backgroundColor: colors.primary }]}>
                 <Text style={styles.badgeText}>
                   {item.unreadCount > 99 ? '99+' : item.unreadCount}
@@ -429,55 +607,75 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text, fontSize: fonts.title }]}>
-          {t.app.name}
-        </Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            onPress={showHomeMenuSheet}
-            style={styles.headerMenuBtn}
-            accessibilityLabel={t.home.chatOptions}
-            hitSlop={8}
-          >
-            <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
-          </TouchableOpacity>
-          <NotificationBell />
-        </View>
-      </View>
-
-      <View style={[styles.searchBar, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
-        <Ionicons name="search" size={20} color={colors.textTertiary} />
-        <TextInput
-          style={[styles.searchInput, { color: colors.text, fontSize: fonts.md }]}
-          placeholder={t.home.search}
-          placeholderTextColor={colors.textTertiary}
-          value={search}
-          onChangeText={setSearch}
+      {selectionMode ? (
+        <ConversationSelectionBar
+          selectedCount={selectedIds.size}
+          selectedLabel={t.chat.selected}
+          deleteLabel={t.common.delete}
+          removeLabel={t.home.removeChat}
+          blockLabel={t.friends.block}
+          onBack={exitSelectionMode}
+          onAction={handleSelectionAction}
+          blockEnabled={blockableSelected.length > 0}
+          colors={colors}
+          fonts={fonts}
         />
-        {syncing ? (
-          <Text style={{ color: colors.textTertiary, fontSize: fonts.xs }}>{t.home.syncing}</Text>
-        ) : null}
-      </View>
+      ) : (
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.text, fontSize: fonts.title }]}>
+            {t.app.name}
+          </Text>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              onPress={showHomeMenuSheet}
+              style={styles.headerMenuBtn}
+              accessibilityLabel={t.home.chatOptions}
+              hitSlop={8}
+            >
+              <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+            </TouchableOpacity>
+            <NotificationBell />
+          </View>
+        </View>
+      )}
+
+      {!selectionMode && (
+        <View style={[styles.searchBar, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+          <Ionicons name="search" size={20} color={colors.textTertiary} />
+          <TextInput
+            style={[styles.searchInput, { color: colors.text, fontSize: fonts.md }]}
+            placeholder={t.home.search}
+            placeholderTextColor={colors.textTertiary}
+            value={search}
+            onChangeText={setSearch}
+          />
+          {syncing ? (
+            <Text style={{ color: colors.textTertiary, fontSize: fonts.xs }}>{t.home.syncing}</Text>
+          ) : null}
+        </View>
+      )}
 
       <FlatList
         data={filtered}
         renderItem={renderItem}
         keyExtractor={(item) => item.id}
+        extraData={selectedIds}
         removeClippedSubviews
         maxToRenderPerBatch={12}
         windowSize={7}
         initialNumToRender={15}
         contentContainerStyle={filtered.length === 0 ? styles.emptyContainer : undefined}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              loadConversations({ background: true });
-            }}
-            tintColor={colors.primary}
-          />
+          selectionMode ? undefined : (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                loadConversations({ background: true });
+              }}
+              tintColor={colors.primary}
+            />
+          )
         }
         ListEmptyComponent={
           !loading ? (
@@ -510,13 +708,21 @@ export default function HomeScreen() {
         }
       />
 
-      <TouchableOpacity
-        style={[styles.fab, { backgroundColor: colors.primary }]}
-        onPress={() => router.push('/(tabs)/friends')}
-        activeOpacity={0.8}
-      >
-        <Ionicons name="create-outline" size={28} color="#FFF" />
-      </TouchableOpacity>
+      {!selectionMode && (
+        <TouchableOpacity
+          style={[styles.fab, { backgroundColor: colors.primary }]}
+          onPress={() => router.push('/(tabs)/friends')}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="create-outline" size={28} color="#FFF" />
+        </TouchableOpacity>
+      )}
+
+      {toast ? (
+        <View style={[styles.toast, { backgroundColor: colors.surfaceSecondary || colors.surface, borderColor: colors.border }]}>
+          <Text style={{ color: colors.text, fontSize: fonts.sm }}>{toast}</Text>
+        </View>
+      ) : null}
 
       <ActionMenuSheet
         visible={showHomeMenu}
@@ -527,6 +733,24 @@ export default function HomeScreen() {
         colors={colors}
         fonts={fonts}
       />
+
+      {confirmDialogCopy && (
+        <ConfirmDialog
+          visible={!!confirmAction}
+          title={confirmDialogCopy.title}
+          message={confirmDialogCopy.message}
+          confirmLabel={confirmDialogCopy.confirmLabel}
+          cancelLabel={t.common.cancel}
+          destructive={confirmDialogCopy.destructive}
+          busy={actionBusy}
+          onConfirm={handleConfirmAction}
+          onCancel={() => {
+            if (!actionBusy) setConfirmAction(null);
+          }}
+          colors={colors}
+          fonts={fonts}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -561,6 +785,27 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     paddingHorizontal: Spacing.lg,
     gap: Spacing.md,
+    alignItems: 'center',
+    marginHorizontal: Spacing.sm,
+    borderRadius: BorderRadius.md,
+  },
+  selectMark: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toast: {
+    position: 'absolute',
+    left: Spacing.lg,
+    right: Spacing.lg,
+    bottom: 88,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
   },
   chatContent: { flex: 1 },

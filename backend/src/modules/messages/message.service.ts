@@ -11,6 +11,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { config } from '../../config';
 import { sanitizeInput } from '../../middleware/validation';
 import { MessageStatus } from '@prisma/client';
+import { userService } from '../users/user.service';
 
 const replyToSelect = {
   id: true,
@@ -70,6 +71,17 @@ export class MessageService {
       where: { conversationId_userId: { conversationId, userId: senderId } },
     });
     if (!participant) throw new AppError(403, 'Not a participant');
+
+    const other = await prisma.participant.findFirst({
+      where: { conversationId, userId: { not: senderId } },
+      include: { user: { select: { id: true, isSystemAccount: true } } },
+    });
+    if (other && !other.user.isSystemAccount) {
+      const blockedIds = await userService.getBlockedUserIds(senderId);
+      if (blockedIds.includes(other.userId)) {
+        throw new AppError(403, 'You cannot message this user');
+      }
+    }
 
     if (replyToId) {
       const replyMsg = await prisma.message.findFirst({

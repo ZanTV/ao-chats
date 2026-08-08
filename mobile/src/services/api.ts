@@ -309,10 +309,14 @@ class ApiClient {
     this.request<{ conversationId: string; clearedAt: string }>(`/conversations/${id}/clear`, {
       method: 'POST',
     });
-  hideConversation = (id: string) =>
-    this.request<{ conversationId: string; hiddenAt: string }>(`/conversations/${id}/hide`, {
-      method: 'POST',
-    });
+  hideConversation = (id: string, options?: { mode?: 'remove' | 'delete' }) =>
+    this.request<{ conversationId: string; hiddenAt: string; clearHistory?: boolean }>(
+      `/conversations/${id}/hide`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ mode: options?.mode || 'delete' }),
+      }
+    );
   hideAllConversations = () =>
     this.request<{ hiddenCount: number; hiddenAt: string }>('/conversations/hide-all', {
       method: 'POST',

@@ -3,6 +3,7 @@ import { friendService } from './friend.service';
 import { authenticate, AuthRequest } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/errorHandler';
 import { paramId } from '../../utils/params';
+import { getIO } from '../../sockets';
 
 const router = Router();
 
@@ -80,7 +81,14 @@ router.delete(
 router.post(
   '/block/:userId',
   asyncHandler(async (req: AuthRequest, res) => {
-    const result = await friendService.blockUser(req.userId!, paramId(req.params.userId));
+    const blockedId = paramId(req.params.userId);
+    const result = await friendService.blockUser(req.userId!, blockedId);
+    const io = getIO();
+    if (io) {
+      const payload = { blockerId: req.userId, blockedId };
+      io.to(`user:${req.userId}`).emit('user:blocked', payload);
+      io.to(`user:${blockedId}`).emit('user:blocked', payload);
+    }
     res.json(result);
   })
 );

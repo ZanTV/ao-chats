@@ -12,6 +12,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { friendService } from '../friends/friend.service';
 import { messageService } from '../messages/message.service';
 import { notificationService } from '../notifications/notification.service';
+import { userService } from '../users/user.service';
 import { getAoManagerId } from '../../services/ao-manager.service';
 import {
   directConversationPairKey,
@@ -84,6 +85,14 @@ export class ConversationService {
     return exact[0];
   }
 
+  private async revealConversationForUser(conversationId: string, userId: string) {
+    await prisma.participant.updateMany({
+      where: { conversationId, userId, hiddenAt: { not: null } },
+      data: { hiddenAt: null },
+    });
+    await cacheDel(CacheKeys.userConversations(userId));
+  }
+
   async getOrCreateDirectConversation(userId: string, otherUserId: string) {
     if (userId === otherUserId) {
       throw new AppError(400, 'Cannot start a conversation with yourself');
@@ -96,6 +105,11 @@ export class ConversationService {
     if (!otherUser) throw new AppError(404, 'User not found');
 
     if (!otherUser.isSystemAccount) {
+      const blockedIds = await userService.getBlockedUserIds(userId);
+      if (blockedIds.includes(otherUserId)) {
+        throw new AppError(403, 'You cannot message this user');
+      }
+
       const areFriends = await friendService.areFriends(userId, otherUserId);
       const hasPending = await friendService.hasPendingConnection(userId, otherUserId);
       if (!areFriends && !hasPending) {
@@ -107,6 +121,7 @@ export class ConversationService {
 
     const byKey = await this.loadDirectConversationByPairKey(pairKey);
     if (byKey) {
+      await this.revealConversationForUser(byKey.id, userId);
       await cacheDel(CacheKeys.userConversations(userId), CacheKeys.userConversations(otherUserId));
       return byKey;
     }
@@ -120,16 +135,21 @@ export class ConversationService {
             data: { directPairKey: pairKey },
             include: conversationWithParticipants,
           });
+          await this.revealConversationForUser(updated.id, userId);
           await cacheDel(CacheKeys.userConversations(userId), CacheKeys.userConversations(otherUserId));
           return updated;
         } catch (err) {
           if (isUniqueViolation(err)) {
             const winner = await this.loadDirectConversationByPairKey(pairKey);
-            if (winner) return winner;
+            if (winner) {
+              await this.revealConversationForUser(winner.id, userId);
+              return winner;
+            }
           }
           throw err;
         }
       }
+      await this.revealConversationForUser(legacy.id, userId);
       return legacy;
     }
 
@@ -149,7 +169,10 @@ export class ConversationService {
     } catch (err) {
       if (isUniqueViolation(err)) {
         const existing = await this.loadDirectConversationByPairKey(pairKey);
-        if (existing) return existing;
+        if (existing) {
+          await this.revealConversationForUser(existing.id, userId);
+          return existing;
+        }
       }
       throw err;
     }
@@ -364,28 +387,39 @@ export class ConversationService {
     return messageService.clearChatForUser(conversationId, userId);
   }
 
-  async hideConversation(conversationId: string, userId: string) {
+  async hideConversation(
+    conversationId: string,
+    userId: string,
+    options?: { clearHistory?: boolean }
+  ) {
     const participant = await prisma.participant.findUnique({
       where: { conversationId_userId: { conversationId, userId } },
     });
     if (!participant) throw new AppError(403, 'Not a participant');
 
+    const clearHistory = options?.clearHistory !== false;
     const now = new Date();
     await prisma.participant.update({
       where: { conversationId_userId: { conversationId, userId } },
       data: {
         hiddenAt: now,
-        clearedAt: now,
+        ...(clearHistory ? { clearedAt: now } : {}),
         lastReadAt: now,
         isPinned: false,
       },
     });
 
     await cacheDel(CacheKeys.userConversations(userId));
-    await cacheInvalidatePattern(`${CacheKeys.messages(conversationId)}:*`);
-    await cacheInvalidatePattern(`${CacheKeys.pinnedMessages(conversationId)}:*`);
+    if (clearHistory) {
+      await cacheInvalidatePattern(`${CacheKeys.messages(conversationId)}:*`);
+      await cacheInvalidatePattern(`${CacheKeys.pinnedMessages(conversationId)}:*`);
+    }
 
-    return { conversationId, hiddenAt: now.toISOString() };
+    return {
+      conversationId,
+      hiddenAt: now.toISOString(),
+      clearHistory,
+    };
   }
 
   async hideAllConversations(userId: string) {

@@ -127,14 +127,18 @@ router.post(
   '/:id/hide',
   asyncHandler(async (req: AuthRequest, res) => {
     const conversationId = paramId(req.params.id);
-    const result = await conversationService.hideConversation(conversationId, req.userId!);
+    const mode = req.body?.mode === 'remove' ? 'remove' : 'delete';
+    const clearHistory = mode !== 'remove';
+    const result = await conversationService.hideConversation(conversationId, req.userId!, {
+      clearHistory,
+    });
     const io = getIO();
     if (io) {
       io.to(`user:${req.userId}`).emit('conversation:hidden', result);
       await emitConversationUpdated(io, conversationId, undefined, {
         targetUserId: req.userId!,
         unreadCount: 0,
-        clearLastMessage: true,
+        clearLastMessage: clearHistory,
         removeFromList: true,
       });
     }
