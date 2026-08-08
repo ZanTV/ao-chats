@@ -50,7 +50,13 @@ export function formatApiError(err: {
     return 'Please verify your email first. Check your inbox or request a new code.';
   }
   if (err.code === 'NETWORK_ERROR') {
-    return 'Cannot reach the AO Chats server. Check your internet connection.';
+    return 'AO Chats server is waking up or temporarily unavailable. Please wait a moment and try again.';
+  }
+  if (err.code === 'SERVER_UNAVAILABLE') {
+    return 'AO Chats server is starting up. Please wait a moment and try again.';
+  }
+  if (err.code === 'TIMEOUT') {
+    return 'Server is taking too long to respond. The API may be starting up — please try again.';
   }
   if (err.code === 'RESET_COOLDOWN') {
     return 'Please wait before requesting another code.';

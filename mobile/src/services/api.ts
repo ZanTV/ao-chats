@@ -1,8 +1,21 @@
 import { getAccessToken, getRefreshToken, saveTokens, clearTokens } from './storage';
-import { getApiUrl, API_TIMEOUT_MS } from './config';
+import { getApiUrl, API_TIMEOUT_MS, isProduction } from './config';
 import { formatApiError, ApiError } from '../utils/validation';
 import { isJwtExpired } from '../utils/jwt';
 import { socketService } from './socket';
+
+const RETRYABLE_CODES = new Set(['NETWORK_ERROR', 'SERVER_UNAVAILABLE', 'TIMEOUT']);
+const MAX_REQUEST_ATTEMPTS = isProduction() ? 3 : 2;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function networkErrorMessage(): string {
+  return isProduction()
+    ? 'AO Chats server is waking up or temporarily unavailable. Please wait a moment and try again.'
+    : 'Cannot reach the AO Chats server. Check your internet connection.';
+}
 
 class ApiClient {
   private get baseUrl() {
@@ -21,14 +34,11 @@ class ApiClient {
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         throw new ApiError(
-          'Server is taking too long to respond. Check your connection and try again.',
-          'TIMEOUT'
-        );
-      }
-      throw new ApiError(
-        'Cannot reach the AO Chats server. Check your internet connection.',
-        'NETWORK_ERROR'
+        'Server is taking too long to respond. The API may be starting up — please try again.',
+        'TIMEOUT'
       );
+      }
+      throw new ApiError(networkErrorMessage(), 'NETWORK_ERROR');
     } finally {
       clearTimeout(timer);
     }
@@ -51,6 +61,27 @@ class ApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt++) {
+      try {
+        return await this.requestOnce<T>(endpoint, options);
+      } catch (err) {
+        lastError = err;
+        const code = err instanceof ApiError ? err.code : undefined;
+        if (code && RETRYABLE_CODES.has(code) && attempt < MAX_REQUEST_ATTEMPTS - 1) {
+          await sleep(1200 * (attempt + 1));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastError;
+  }
+
+  private async requestOnce<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
     const token = await getAccessToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -66,11 +97,7 @@ class ApiClient {
       });
     } catch (err) {
       if (err instanceof ApiError) throw err;
-      const msg =
-        typeof window !== 'undefined'
-          ? 'Cannot reach the AO Chats server. The API may be starting up — wait a moment and try again.'
-          : 'Cannot reach the AO Chats server. Check your internet connection.';
-      throw new ApiError(msg, 'NETWORK_ERROR');
+      throw new ApiError(networkErrorMessage(), 'NETWORK_ERROR');
     }
 
     if (response.status === 401) {
@@ -147,7 +174,10 @@ class ApiClient {
       await saveTokens(accessToken, refresh);
       socketService.reconnect().catch(() => {});
       return true;
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError && err.code && RETRYABLE_CODES.has(err.code)) {
+        return false;
+      }
       await clearTokens();
       return false;
     }

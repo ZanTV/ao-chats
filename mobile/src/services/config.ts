@@ -24,21 +24,43 @@ function missingEnv(name: string): never {
   );
 }
 
-function requirePublicEnv(name: keyof typeof PRODUCTION_URL_DEFAULTS): string {
-  const value = process.env[name]?.trim();
-  if (value) {
-    if (LOCALHOST_PATTERN.test(value)) {
-      throw new Error(`${name} must not use localhost in production (got: ${value})`);
+function readExtraEnv(key: 'apiUrl' | 'socketUrl' | 'appUrl' | 'storageUrl' | 'env'): string | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Constants = require('expo-constants').default;
+    const value = Constants.expoConfig?.extra?.[key] as string | undefined;
+    return value?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolvePublicEnv(
+  envKey: keyof typeof PRODUCTION_URL_DEFAULTS,
+  extraKey: 'apiUrl' | 'socketUrl' | 'appUrl' | 'storageUrl'
+): string {
+  const fromProcess = process.env[envKey]?.trim();
+  if (fromProcess) {
+    if (LOCALHOST_PATTERN.test(fromProcess)) {
+      throw new Error(`${envKey} must not use localhost in production (got: ${fromProcess})`);
     }
-    return stripTrailingSlash(value);
+    return stripTrailingSlash(fromProcess);
   }
 
-  const fallback = PRODUCTION_URL_DEFAULTS[name];
+  const fromExtra = readExtraEnv(extraKey);
+  if (fromExtra) {
+    if (LOCALHOST_PATTERN.test(fromExtra)) {
+      throw new Error(`${envKey} must not use localhost in production (got: ${fromExtra})`);
+    }
+    return stripTrailingSlash(fromExtra);
+  }
+
+  const fallback = PRODUCTION_URL_DEFAULTS[envKey];
   if (isProduction() && fallback) {
     return fallback;
   }
 
-  missingEnv(name);
+  missingEnv(envKey);
 }
 
 function getDevApiUrl(): string {
@@ -79,6 +101,8 @@ export function getEnv(): string {
   if (process.env.EXPO_PUBLIC_ENV?.trim()) {
     return process.env.EXPO_PUBLIC_ENV.trim();
   }
+  const fromExtra = readExtraEnv('env');
+  if (fromExtra) return fromExtra;
   return __DEV__ ? 'development' : 'production';
 }
 
@@ -88,7 +112,7 @@ export function isProduction(): boolean {
 
 export function getApiUrl(): string {
   if (isProduction()) {
-    return requirePublicEnv('EXPO_PUBLIC_API_URL');
+    return resolvePublicEnv('EXPO_PUBLIC_API_URL', 'apiUrl');
   }
   if (process.env.EXPO_PUBLIC_API_URL?.trim()) {
     return stripTrailingSlash(process.env.EXPO_PUBLIC_API_URL.trim());
@@ -98,7 +122,7 @@ export function getApiUrl(): string {
 
 export function getSocketUrl(): string {
   if (isProduction()) {
-    return requirePublicEnv('EXPO_PUBLIC_SOCKET_URL');
+    return resolvePublicEnv('EXPO_PUBLIC_SOCKET_URL', 'socketUrl');
   }
   if (process.env.EXPO_PUBLIC_SOCKET_URL?.trim()) {
     return stripTrailingSlash(process.env.EXPO_PUBLIC_SOCKET_URL.trim());
@@ -108,7 +132,7 @@ export function getSocketUrl(): string {
 
 export function getAppUrl(): string {
   if (isProduction()) {
-    return requirePublicEnv('EXPO_PUBLIC_APP_URL');
+    return resolvePublicEnv('EXPO_PUBLIC_APP_URL', 'appUrl');
   }
   return stripTrailingSlash(
     process.env.EXPO_PUBLIC_APP_URL?.trim() || 'http://localhost:8081'
@@ -117,7 +141,7 @@ export function getAppUrl(): string {
 
 export function getStorageUrl(): string {
   if (isProduction()) {
-    return requirePublicEnv('EXPO_PUBLIC_STORAGE_URL');
+    return resolvePublicEnv('EXPO_PUBLIC_STORAGE_URL', 'storageUrl');
   }
   if (process.env.EXPO_PUBLIC_STORAGE_URL?.trim()) {
     return stripTrailingSlash(process.env.EXPO_PUBLIC_STORAGE_URL.trim());
@@ -129,8 +153,8 @@ export function getAppName(): string {
   return process.env.EXPO_PUBLIC_APP_NAME?.trim() || 'AO Chats';
 }
 
-export const INIT_TIMEOUT_MS = 20000;
-export const API_TIMEOUT_MS = 30000;
+export const INIT_TIMEOUT_MS = 45000;
+export const API_TIMEOUT_MS = 45000;
 
 /** Wrap a promise with a timeout. Rejects if time expires (unless fallback is set). */
 export function withTimeout<T>(

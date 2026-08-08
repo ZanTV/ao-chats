@@ -15,6 +15,7 @@ import { NotificationPanel } from '../src/components/NotificationPanel';
 import { GlobalRealtimeListeners } from '../src/components/GlobalRealtimeListeners';
 import { hydrateLocalCache } from '../src/cache';
 import { initializePushNotifications, unregisterPushNotifications } from '../src/services/pushService';
+import { warmupApi } from '../src/services/apiHealth';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -54,6 +55,7 @@ export default function RootLayout() {
       }
       if (cancelled) return;
       try {
+        await warmupApi();
         await Promise.all([loadSettings(), initializeAuth()]);
       } catch {
         // still allow app to open

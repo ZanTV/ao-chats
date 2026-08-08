@@ -140,7 +140,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (isJwtExpired(token)) {
         const refreshed = await api.ensureValidSession();
         if (!refreshed) {
-          await clearTokens();
+          const refresh = await getRefreshToken();
+          const cachedAfterFail = await getCachedUser<User>().catch(() => null);
+          if (cachedAfterFail && refresh) {
+            set({ user: cachedAfterFail, isAuthenticated: true, isLoading: false });
+            socketService.connect().catch(() => {});
+            return;
+          }
+          if (!refresh) {
+            await clearTokens();
+          }
           set({ user: null, isAuthenticated: false, isLoading: false });
           return;
         }
@@ -160,9 +169,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         await clearTokens().catch(() => {});
         set({ user: null, isAuthenticated: false, isLoading: false });
       } else if (cached) {
-        // Offline / temporary DB issue — keep cached session
+        // Offline / temporary API issue — keep cached session
         set({ user: cached, isAuthenticated: true, isLoading: false });
         socketService.connect().catch(() => {});
+      } else if (
+        err instanceof ApiError &&
+        err.code &&
+        ['NETWORK_ERROR', 'SERVER_UNAVAILABLE', 'TIMEOUT'].includes(err.code)
+      ) {
+        set({ user: null, isAuthenticated: false, isLoading: false });
       } else {
         set({ user: null, isAuthenticated: false, isLoading: false });
       }
