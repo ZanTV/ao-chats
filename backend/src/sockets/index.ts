@@ -240,9 +240,9 @@ export function setupSocketIO(httpServer: HttpServer): Server {
 
       await emitConversationUpdated(io, data.conversationId, undefined, {
         readerId: userId,
-        unreadCount: 0,
       });
 
+      // Refresh previews with authoritative unread (reader stays 0)
       await refreshConversationPreviews(io, data.conversationId);
     });
 

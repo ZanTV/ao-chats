@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import { prisma } from '../config/database';
 import { cacheDel, CacheKeys } from '../config/redis';
 import { formatMessagePreview } from '../utils/conversation.utils';
+import { fetchUnreadCountForConversation } from '../modules/conversations/unreadCounts';
 
 export async function emitConversationUpdated(
   io: Server,
@@ -103,17 +104,19 @@ export async function emitConversationUpdated(
       };
     }
 
+    // Always send authoritative per-user unread so clients never invent counts.
+    // Reader who just marked read gets 0; everyone else gets DB truth.
+    const unreadCount =
+      options?.readerId === userId
+        ? 0
+        : await fetchUnreadCountForConversation(conversationId, userId);
+
     const payload = {
       conversationId,
       updatedAt,
       lastMessage: payloadLastMessage,
       removeFromList: options?.removeFromList === true,
-      unreadCount:
-        options?.readerId === userId
-          ? 0
-          : options?.unreadCount !== undefined
-            ? options.unreadCount
-            : undefined,
+      unreadCount,
     };
 
     io.to(`user:${userId}`).emit('conversation:updated', payload);

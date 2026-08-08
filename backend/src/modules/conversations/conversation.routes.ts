@@ -99,7 +99,6 @@ router.post(
       }
       await emitConversationUpdated(io, conversationId, undefined, {
         readerId: req.userId!,
-        unreadCount: 0,
       });
     }
     res.json(result);

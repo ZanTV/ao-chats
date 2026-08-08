@@ -120,9 +120,16 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   },
 
   markRead: async (id) => {
+    const existing = get().notifications.find((n) => n.id === id);
+    if (existing?.isRead) return;
+
     await api.markNotificationRead(id);
     set((state) => {
-      const unreadCount = Math.max(0, state.unreadCount - 1);
+      const target = state.notifications.find((n) => n.id === id);
+      const unreadCount =
+        target && !target.isRead
+          ? Math.max(0, state.unreadCount - 1)
+          : state.unreadCount;
       syncBadge(unreadCount);
       return {
         notifications: state.notifications.map((n) =>
@@ -172,7 +179,10 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         }
         return n;
       });
-      const decrement = count > 0 ? count : cleared;
+      if (cleared === 0 && count <= 0) {
+        return state;
+      }
+      const decrement = count > 0 ? Math.min(count, state.unreadCount) : cleared;
       const unreadCount = Math.max(0, state.unreadCount - decrement);
       syncBadge(unreadCount);
       return {
@@ -180,6 +190,8 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         unreadCount,
       };
     });
+    // Reconcile with server so badge stays accurate across devices
+    scheduleRefresh(() => get().refresh());
   },
 
   initialize: () => {

@@ -173,21 +173,21 @@ export default function HomeScreen() {
           updated.lastMessage = null;
         } else if (payload.lastMessage) {
           updated.lastMessage = payload.lastMessage;
-          if (payload.unreadCount === undefined && payload.lastMessage.senderId !== user?.id) {
-            updated.unreadCount = (current.unreadCount || 0) + 1;
-          }
         }
 
+        // Only apply server-authoritative unread — never invent +1 locally
         if (payload.unreadCount !== undefined) {
-          updated.unreadCount = payload.unreadCount;
+          updated.unreadCount = Math.max(0, payload.unreadCount);
         }
 
         const next = [...prev];
         next.splice(idx, 1);
-        return sortConversations([updated, ...next]);
+        const sorted = sortConversations([updated, ...next]);
+        cacheManager.set(CacheDomain.CONVERSATIONS, sorted);
+        return sorted;
       });
     },
-    [loadConversations, removeConversationFromList, user?.id]
+    [loadConversations, removeConversationFromList]
   );
 
   const confirmDeleteChat = useCallback(
@@ -279,16 +279,6 @@ export default function HomeScreen() {
     const unsub1 = socketService.on('conversation:updated', (data: unknown) => {
       applyConversationUpdate(data as ConversationUpdatePayload);
     });
-    const unsubUpdate = socketService.on('conversation:update', (data: unknown) => {
-      applyConversationUpdate(data as ConversationUpdatePayload);
-    });
-    const unsubNew = socketService.on('message:new', (data: unknown) => {
-      const payload = data as { conversationId?: string };
-      if (payload.conversationId) {
-        applyConversationUpdate({ conversationId: payload.conversationId });
-      }
-    });
-
     const unsubStatus = socketService.on('message:status', (data: unknown) => {
       const payload = data as {
         messageId: string;
@@ -322,8 +312,6 @@ export default function HomeScreen() {
 
     return () => {
       unsub1();
-      unsubUpdate();
-      unsubNew();
       unsubStatus();
       unsubHidden();
       unsubHideAll();

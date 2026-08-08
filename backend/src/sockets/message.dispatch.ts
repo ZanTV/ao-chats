@@ -5,6 +5,23 @@ import { notificationService } from '../modules/notifications/notification.servi
 import { emitConversationUpdated } from './conversation.events';
 import { prisma } from '../config/database';
 
+function isUserInConversationRoom(
+  io: Server,
+  conversationId: string,
+  userId: string
+): boolean {
+  const room = io.sockets.adapter.rooms.get(`conversation:${conversationId}`);
+  if (!room) return false;
+  for (const socketId of room) {
+    const socket = io.sockets.sockets.get(socketId) as
+      | { userId?: string; data?: { userId?: string } }
+      | undefined;
+    if (!socket) continue;
+    if (socket.userId === userId || socket.data?.userId === userId) return true;
+  }
+  return false;
+}
+
 export function emitMessageStatus(
   io: Server,
   conversationId: string,
@@ -82,17 +99,25 @@ export async function createAndDispatchMessage(
       const sender = conversation.participants.find((p) => p.userId === senderId);
 
       if (otherParticipant && sender) {
-        await notificationService.notifyNewMessage(
-          otherParticipant.userId,
-          sender.user.firstName,
-          senderId,
+        const recipientInChat = isUserInConversationRoom(
+          io,
           conversationId,
-          content
+          otherParticipant.userId
         );
-        io.to(`user:${otherParticipant.userId}`).emit('notification:new', {
-          type: 'NEW_MESSAGE',
-          conversationId,
-        });
+
+        if (!recipientInChat) {
+          await notificationService.notifyNewMessage(
+            otherParticipant.userId,
+            sender.user.firstName,
+            senderId,
+            conversationId,
+            content
+          );
+          io.to(`user:${otherParticipant.userId}`).emit('notification:new', {
+            type: 'NEW_MESSAGE',
+            conversationId,
+          });
+        }
       }
     } catch {
       // notifications optional

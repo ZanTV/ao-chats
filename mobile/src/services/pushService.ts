@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
@@ -140,6 +140,12 @@ export async function initializePushNotifications(): Promise<() => void> {
     const active = getActiveConversation();
 
     if (conversationId && active === conversationId) {
+      return;
+    }
+
+    // While app is foregrounded, Socket.IO `notification:new` owns the badge.
+    // Avoid double-increment (push + socket).
+    if (AppState.currentState === 'active') {
       return;
     }
 

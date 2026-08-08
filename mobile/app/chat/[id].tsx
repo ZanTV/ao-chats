@@ -37,7 +37,7 @@ import { useChatComposerStore } from '../../src/stores/chatComposerStore';
 import { useTypingStore } from '../../src/stores/typingStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
-import { cacheManager, MESSAGE_PAGE_SIZE } from '../../src/cache';
+import { cacheManager, MESSAGE_PAGE_SIZE, CacheDomain } from '../../src/cache';
 import { dedupeSocketHandler } from '../../src/utils/socketDedup';
 import { ApiError } from '../../src/utils/validation';
 import {
@@ -133,7 +133,32 @@ export default function ChatScreen() {
   const [showDeleteMenu, setShowDeleteMenu] = useState(false);
   const [unpinningId, setUnpinningId] = useState<string | null>(null);
 
+  const lastMarkReadAtRef = useRef(0);
   const flatListRef = useRef<RNFlatList<ListItem>>(null);
+
+  const clearLocalConversationUnread = useCallback((id: string) => {
+    const cached = cacheManager.get<Array<{ id: string; unreadCount?: number }>>(
+      CacheDomain.CONVERSATIONS
+    );
+    if (!cached?.data) return;
+    const next = cached.data.map((c) =>
+      c.id === id ? { ...c, unreadCount: 0 } : c
+    );
+    cacheManager.set(CacheDomain.CONVERSATIONS, next);
+  }, []);
+
+  const markConversationReadNow = useCallback(
+    (id: string, force = false) => {
+      const now = Date.now();
+      if (!force && now - lastMarkReadAtRef.current < 700) return;
+      lastMarkReadAtRef.current = now;
+      clearLocalConversationUnread(id);
+      socketService.markRead(id);
+      api.markConversationRead(id).catch(() => {});
+      markConversationNotificationsRead(id);
+    },
+    [clearLocalConversationUnread, markConversationNotificationsRead]
+  );
   const inputRef = useRef<TextInput>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const draftSaveTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -148,10 +173,13 @@ export default function ChatScreen() {
     stickToBottomRef.current = true;
     setPendingBelowCount(0);
     setShowScrollDown(false);
+    if (conversationId) {
+      markConversationReadNow(conversationId);
+    }
     requestAnimationFrame(() => {
       flatListRef.current?.scrollToEnd({ animated });
     });
-  }, []);
+  }, [conversationId, markConversationReadNow]);
 
   const otherUser = conversation?.participants.find((p) => p.userId !== user?.id)?.user;
   const recipientOnline = otherUser?.status === 'ONLINE';
@@ -500,8 +528,8 @@ export default function ChatScreen() {
           scrollToLatest(false);
         }
         socketService.joinConversation(conversationId);
-        socketService.markRead(conversationId);
-        markConversationNotificationsRead(conversationId);
+        // Optimistic local badge clear + socket + HTTP (works even if socket is down)
+        markConversationReadNow(conversationId, true);
       };
 
       void openChat();
@@ -517,7 +545,7 @@ export default function ChatScreen() {
         setShowUnreadDivider(false);
         unreadSessionRef.current = false;
       };
-    }, [conversationId, loadMessages, loadConversationMeta, markConversationNotificationsRead, highlightParam, scrollToLatest])
+    }, [conversationId, loadMessages, loadConversationMeta, markConversationReadNow, highlightParam, scrollToLatest])
   );
 
   useEffect(() => {
@@ -541,7 +569,7 @@ export default function ChatScreen() {
           if (!stickToBottomRef.current) {
             setPendingBelowCount((count) => count + 1);
           } else {
-            socketService.markRead(conversationId);
+            markConversationReadNow(conversationId);
           }
         }
         if (stickToBottomRef.current && !isJumpingRef.current) {
@@ -689,7 +717,7 @@ export default function ChatScreen() {
     ];
 
     return () => unsubs.forEach((u) => u());
-  }, [conversationId, user?.id, updateMessages, loadConversationMeta, loadMessages, t.common.error, scrollToLatest, applyMessages]);
+  }, [conversationId, user?.id, updateMessages, loadConversationMeta, loadMessages, t.common.error, scrollToLatest, applyMessages, markConversationReadNow]);
 
   const handleSend = async () => {
     if (!inputText.trim() || !conversationId || !user) return;
@@ -1292,7 +1320,10 @@ export default function ChatScreen() {
               layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
             stickToBottomRef.current = atBottom;
             setShowScrollDown(!atBottom);
-            if (atBottom) setPendingBelowCount(0);
+            if (atBottom) {
+              setPendingBelowCount(0);
+              if (conversationId) markConversationReadNow(conversationId);
+            }
             if (contentOffset.y < 60 && hasMoreRef.current && !loadingOlder) {
               loadOlderMessages();
             }
