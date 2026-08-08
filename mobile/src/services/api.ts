@@ -168,10 +168,10 @@ class ApiClient {
   forgotPassword = (email: string) =>
     this.request('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
 
-  resetPassword = (email: string, code: string, newPassword: string) =>
+  resetPassword = (email: string, code: string, newPassword: string, confirmPassword: string) =>
     this.request('/auth/reset-password', {
       method: 'POST',
-      body: JSON.stringify({ email, code, newPassword }),
+      body: JSON.stringify({ email, code, newPassword, confirmPassword }),
     });
 
   checkUsername = (username: string) =>
@@ -261,6 +261,14 @@ class ApiClient {
     this.request(`/conversations/${id}/read`, { method: 'POST' });
   clearConversation = (id: string) =>
     this.request<{ conversationId: string; clearedAt: string }>(`/conversations/${id}/clear`, {
+      method: 'POST',
+    });
+  hideConversation = (id: string) =>
+    this.request<{ conversationId: string; hiddenAt: string }>(`/conversations/${id}/hide`, {
+      method: 'POST',
+    });
+  hideAllConversations = () =>
+    this.request<{ hiddenCount: number; hiddenAt: string }>('/conversations/hide-all', {
       method: 'POST',
     });
 

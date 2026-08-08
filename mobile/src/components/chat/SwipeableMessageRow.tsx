@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -13,7 +13,7 @@ import { MessageBubble } from './MessageBubble';
 import { Spacing } from '../../theme';
 import { clampOpacity } from '../../utils/reanimatedColors';
 
-const SWIPE_THRESHOLD = 56;
+const SWIPE_THRESHOLD = 48;
 const MAX_SWIPE = 72;
 
 interface ThemeColors {
@@ -52,42 +52,45 @@ interface Props {
   seeMoreLabel?: string;
   seeLessLabel?: string;
   editedLabel?: string;
-  pressHighlight?: string;
 }
 
 function MessageRowContent(props: Props) {
-  const highlight = props.pressHighlight || props.colors.primary + '12';
+  const tap = Gesture.Tap().onEnd(() => {
+    runOnJS(props.onPress)();
+  });
+
+  const longPress = Gesture.LongPress()
+    .minDuration(280)
+    .maxDistance(12)
+    .onStart(() => {
+      runOnJS(props.onLongPress)();
+    });
+
+  const touch = Gesture.Exclusive(longPress, tap);
 
   return (
-    <Pressable
-      onPress={props.onPress}
-      onLongPress={props.onLongPress}
-      delayLongPress={280}
-      style={({ pressed, hovered }) => [
-        styles.pressWrap,
-        pressed && { backgroundColor: highlight },
-        Platform.OS === 'web' && hovered && { backgroundColor: highlight },
-      ]}
-    >
-      <MessageBubble
-        message={props.message}
-        isOwn={props.isOwn}
-        isSelected={props.isSelected}
-        isPinned={props.isPinned}
-        isHighlighted={props.isHighlighted}
-        colors={props.colors}
-        fonts={props.fonts}
-        formatTime={props.formatTime}
-        onReplyPress={props.onReplyPress}
-        onReactionPress={props.onReactionPress}
-        currentUserId={props.currentUserId}
-        deletedLabel={props.deletedLabel}
-        compactBottom={props.compactBottom}
-        seeMoreLabel={props.seeMoreLabel}
-        seeLessLabel={props.seeLessLabel}
-        editedLabel={props.editedLabel}
-      />
-    </Pressable>
+    <GestureDetector gesture={touch}>
+      <View style={styles.pressWrap}>
+        <MessageBubble
+          message={props.message}
+          isOwn={props.isOwn}
+          isSelected={props.isSelected}
+          isPinned={props.isPinned}
+          isHighlighted={props.isHighlighted}
+          colors={props.colors}
+          fonts={props.fonts}
+          formatTime={props.formatTime}
+          onReplyPress={props.onReplyPress}
+          onReactionPress={props.onReactionPress}
+          currentUserId={props.currentUserId}
+          deletedLabel={props.deletedLabel}
+          compactBottom={props.compactBottom}
+          seeMoreLabel={props.seeMoreLabel}
+          seeLessLabel={props.seeLessLabel}
+          editedLabel={props.editedLabel}
+        />
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -96,11 +99,11 @@ function SwipeableMessageRowNative(props: Props) {
   const triggered = useSharedValue(false);
 
   const pan = Gesture.Pan()
-    .activeOffsetX(12)
-    .failOffsetY([-12, 12])
+    .activeOffsetX(10)
+    .failOffsetY([-14, 14])
     .onUpdate((e) => {
       if (e.translationX > 0) {
-        translateX.value = Math.min(e.translationX * 0.85, MAX_SWIPE);
+        translateX.value = Math.min(e.translationX * 0.9, MAX_SWIPE);
         if (translateX.value >= SWIPE_THRESHOLD && !triggered.value) {
           triggered.value = true;
           runOnJS(props.onSwipeReply)();
@@ -108,7 +111,7 @@ function SwipeableMessageRowNative(props: Props) {
       }
     })
     .onEnd(() => {
-      translateX.value = withSpring(0, { damping: 18, stiffness: 220 });
+      translateX.value = withSpring(0, { damping: 20, stiffness: 260 });
       triggered.value = false;
     });
 
@@ -120,7 +123,7 @@ function SwipeableMessageRowNative(props: Props) {
     const progress = clampOpacity(translateX.value / SWIPE_THRESHOLD);
     return {
       opacity: progress,
-      transform: [{ scale: 0.8 + progress * 0.2 }],
+      transform: [{ scale: 0.82 + progress * 0.18 }],
     };
   });
 

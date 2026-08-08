@@ -91,7 +91,7 @@ export class ConversationService {
     }
 
     const participations = await prisma.participant.findMany({
-      where: { userId },
+      where: { userId, hiddenAt: null },
       include: {
         conversation: {
           include: {
@@ -171,6 +171,7 @@ export class ConversationService {
               status: lastMessage.status,
               deliveredAt: lastMessage.deliveredAt?.toISOString(),
               readAt: lastMessage.readAt?.toISOString(),
+              waitingAt: lastMessage.waitingAt?.toISOString(),
               isEdited: lastMessage.isEdited,
             }
           : null,
@@ -243,6 +244,55 @@ export class ConversationService {
 
   async clearChat(conversationId: string, userId: string) {
     return messageService.clearChatForUser(conversationId, userId);
+  }
+
+  async hideConversation(conversationId: string, userId: string) {
+    const participant = await prisma.participant.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+    if (!participant) throw new AppError(403, 'Not a participant');
+
+    const now = new Date();
+    await prisma.participant.update({
+      where: { conversationId_userId: { conversationId, userId } },
+      data: {
+        hiddenAt: now,
+        clearedAt: now,
+        lastReadAt: now,
+        isPinned: false,
+      },
+    });
+
+    await cacheDel(CacheKeys.userConversations(userId));
+    await cacheInvalidatePattern(`${CacheKeys.messages(conversationId)}:*`);
+    await cacheInvalidatePattern(`${CacheKeys.pinnedMessages(conversationId)}:*`);
+
+    return { conversationId, hiddenAt: now.toISOString() };
+  }
+
+  async hideAllConversations(userId: string) {
+    const now = new Date();
+    const participations = await prisma.participant.findMany({
+      where: { userId, hiddenAt: null },
+      select: { conversationId: true },
+    });
+
+    const result = await prisma.participant.updateMany({
+      where: { userId, hiddenAt: null },
+      data: {
+        hiddenAt: now,
+        clearedAt: now,
+        lastReadAt: now,
+        isPinned: false,
+      },
+    });
+
+    await cacheDel(CacheKeys.userConversations(userId));
+    for (const p of participations) {
+      await cacheInvalidatePattern(`${CacheKeys.messages(p.conversationId)}:*`);
+    }
+
+    return { hiddenCount: result.count, hiddenAt: now.toISOString() };
   }
 }
 

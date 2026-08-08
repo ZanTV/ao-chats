@@ -94,6 +94,8 @@ export const config = {
   },
   maxPinnedMessages: 20,
   verifyCodeExpiryMs: envInt('VERIFY_CODE_EXPIRY_MINUTES', 5) * 60 * 1000,
+  resetCodeExpiryMs: envInt('RESET_CODE_EXPIRY_MINUTES', 10) * 60 * 1000,
+  passwordResetResendCooldownMs: envInt('PASSWORD_RESET_RESEND_SECONDS', 30) * 1000,
   resendCodeCooldownMs: 60 * 1000,
 };
 

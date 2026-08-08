@@ -19,6 +19,18 @@ router.get(
 );
 
 router.post(
+  '/hide-all',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const result = await conversationService.hideAllConversations(req.userId!);
+    const io = getIO();
+    if (io) {
+      io.to(`user:${req.userId}`).emit('conversation:hide-all', result);
+    }
+    res.json(result);
+  })
+);
+
+router.post(
   '/direct/:userId',
   asyncHandler(async (req: AuthRequest, res) => {
     const conversation = await conversationService.getOrCreateDirectConversation(
@@ -106,6 +118,25 @@ router.post(
         targetUserId: req.userId!,
         unreadCount: 0,
         clearLastMessage: true,
+      });
+    }
+    res.json(result);
+  })
+);
+
+router.post(
+  '/:id/hide',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const conversationId = paramId(req.params.id);
+    const result = await conversationService.hideConversation(conversationId, req.userId!);
+    const io = getIO();
+    if (io) {
+      io.to(`user:${req.userId}`).emit('conversation:hidden', result);
+      await emitConversationUpdated(io, conversationId, undefined, {
+        targetUserId: req.userId!,
+        unreadCount: 0,
+        clearLastMessage: true,
+        removeFromList: true,
       });
     }
     res.json(result);

@@ -111,6 +111,11 @@ export class MessageService {
         data: { updatedAt: new Date() },
       });
 
+      await tx.participant.updateMany({
+        where: { conversationId, hiddenAt: { not: null } },
+        data: { hiddenAt: null },
+      });
+
       return msg;
     });
 

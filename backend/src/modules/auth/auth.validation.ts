@@ -85,11 +85,25 @@ export const forgotPasswordSchema = z.object({
   email: emailField,
 });
 
-export const resetPasswordSchema = z.object({
-  email: emailField,
-  code: z.string().trim().length(6),
-  newPassword: z.string().min(8),
-});
+export const resetPasswordSchema = z
+  .object({
+    email: emailField,
+    code: z
+      .string({ required_error: 'Verification code is required' })
+      .trim()
+      .length(6, 'Verification code must be 6 digits'),
+    newPassword: z
+      .string({ required_error: 'Password is required' })
+      .min(8, 'Password must be at least 8 characters')
+      .regex(/[A-Z]/, 'Password must contain an uppercase letter')
+      .regex(/[a-z]/, 'Password must contain a lowercase letter')
+      .regex(/[0-9]/, 'Password must contain a number'),
+    confirmPassword: z.string({ required_error: 'Please confirm your password' }),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
 
 export const refreshTokenSchema = z.object({
   refreshToken: z.string({ required_error: 'Refresh token is required' }).min(1),

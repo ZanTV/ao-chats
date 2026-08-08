@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   TextInput,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -65,6 +66,7 @@ interface ConversationUpdatePayload {
   updatedAt?: string;
   lastMessage?: Conversation['lastMessage'] | null;
   unreadCount?: number;
+  removeFromList?: boolean;
 }
 
 export default function HomeScreen() {
@@ -98,8 +100,30 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, []);
 
+  const persistConversations = useCallback((list: Conversation[]) => {
+    const sorted = sortConversations(list);
+    setConversations(sorted);
+    cacheManager.set(CacheDomain.CONVERSATIONS, sorted);
+  }, []);
+
+  const removeConversationFromList = useCallback(
+    (conversationId: string) => {
+      setConversations((prev) => {
+        const next = prev.filter((c) => c.id !== conversationId);
+        cacheManager.set(CacheDomain.CONVERSATIONS, sortConversations(next));
+        return next;
+      });
+    },
+    []
+  );
+
   const applyConversationUpdate = useCallback(
     (payload: ConversationUpdatePayload) => {
+      if (payload.removeFromList) {
+        removeConversationFromList(payload.conversationId);
+        return;
+      }
+
       setConversations((prev) => {
         const idx = prev.findIndex((c) => c.id === payload.conversationId);
         if (idx === -1) {
@@ -131,8 +155,72 @@ export default function HomeScreen() {
         return sortConversations([updated, ...next]);
       });
     },
-    [loadConversations, user?.id]
+    [loadConversations, removeConversationFromList, user?.id]
   );
+
+  const confirmDeleteChat = useCallback(
+    (conversationId: string) => {
+      Alert.alert(t.home.deleteChatTitle, t.home.deleteChatMessage, [
+        { text: t.common.cancel, style: 'cancel' },
+        {
+          text: t.common.delete,
+          style: 'destructive',
+          onPress: async () => {
+            const previous = conversations;
+            removeConversationFromList(conversationId);
+            try {
+              await api.hideConversation(conversationId);
+            } catch {
+              persistConversations(previous);
+              Alert.alert(t.common.error, t.home.deleteFailed);
+            }
+          },
+        },
+      ]);
+    },
+    [conversations, persistConversations, removeConversationFromList, t]
+  );
+
+  const showChatOptions = useCallback(
+    (item: Conversation) => {
+      Alert.alert(t.home.chatOptions, undefined, [
+        {
+          text: t.home.deleteChat,
+          style: 'destructive',
+          onPress: () => confirmDeleteChat(item.id),
+        },
+        { text: t.common.cancel, style: 'cancel' },
+      ]);
+    },
+    [confirmDeleteChat, t]
+  );
+
+  const handleDeleteAll = useCallback(() => {
+    Alert.alert(t.home.deleteAllTitle, t.home.deleteAllMessage, [
+      { text: t.common.cancel, style: 'cancel' },
+      {
+        text: t.home.deleteAll,
+        style: 'destructive',
+        onPress: async () => {
+          const previous = conversations;
+          persistConversations([]);
+          try {
+            await api.hideAllConversations();
+          } catch {
+            persistConversations(previous);
+            Alert.alert(t.common.error, t.home.deleteFailed);
+          }
+        },
+      },
+    ]);
+  }, [conversations, persistConversations, t]);
+
+  const showHomeMenu = useCallback(() => {
+    Alert.alert(t.home.chatOptions, undefined, [
+      { text: t.home.deleteAll, style: 'destructive', onPress: handleDeleteAll },
+      { text: t.common.cancel, style: 'cancel' },
+    ]);
+  }, [handleDeleteAll, t]);
 
   useFocusEffect(
     useCallback(() => {
@@ -180,13 +268,23 @@ export default function HomeScreen() {
       );
     });
 
+    const unsubHidden = socketService.on('conversation:hidden', (data: unknown) => {
+      const payload = data as { conversationId: string };
+      if (payload.conversationId) removeConversationFromList(payload.conversationId);
+    });
+    const unsubHideAll = socketService.on('conversation:hide-all', () => {
+      persistConversations([]);
+    });
+
     return () => {
       unsub1();
       unsubUpdate();
       unsubNew();
       unsubStatus();
+      unsubHidden();
+      unsubHideAll();
     };
-  }, [loadConversations, applyConversationUpdate]);
+  }, [loadConversations, applyConversationUpdate, removeConversationFromList, persistConversations]);
 
   const filtered = conversations.filter((c) => {
     if (!search) return true;
@@ -229,6 +327,8 @@ export default function HomeScreen() {
       <TouchableOpacity
         style={[styles.chatItem, { backgroundColor: colors.surface }]}
         onPress={() => router.push(`/chat/${item.id}`)}
+        onLongPress={() => showChatOptions(item)}
+        delayLongPress={400}
         activeOpacity={0.7}
       >
         <Avatar
@@ -301,7 +401,17 @@ export default function HomeScreen() {
         <Text style={[styles.title, { color: colors.text, fontSize: fonts.title }]}>
           {t.app.name}
         </Text>
-        <NotificationBell />
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={showHomeMenu}
+            style={styles.headerMenuBtn}
+            accessibilityLabel={t.home.chatOptions}
+            hitSlop={8}
+          >
+            <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+          </TouchableOpacity>
+          <NotificationBell />
+        </View>
       </View>
 
       <View style={[styles.searchBar, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
@@ -371,6 +481,8 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.sm,
   },
   title: { fontWeight: '700' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  headerMenuBtn: { padding: Spacing.xs },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',

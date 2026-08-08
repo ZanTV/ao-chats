@@ -52,6 +52,21 @@ export function formatApiError(err: {
   if (err.code === 'NETWORK_ERROR') {
     return 'Cannot reach the AO Chats server. Check your internet connection.';
   }
+  if (err.code === 'RESET_COOLDOWN') {
+    return 'Please wait before requesting another code.';
+  }
+  if (err.code === 'RESET_EXPIRED') {
+    return 'This code has expired. Please request a new one.';
+  }
+  if (err.code === 'INVALID_RESET_CODE') {
+    return 'The verification code is incorrect.';
+  }
+  if (err.code === 'RESET_ATTEMPTS') {
+    return 'Too many attempts. Please request a new code.';
+  }
+  if (err.code === 'EMAIL_SEND_FAILED') {
+    return "We couldn't send the verification code. Please try again.";
+  }
   return 'Something went wrong. Please try again.';
 }
 

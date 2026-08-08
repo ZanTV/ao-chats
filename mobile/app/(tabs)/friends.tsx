@@ -23,6 +23,7 @@ import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
 import { cacheManager, CacheDomain } from '../../src/cache';
 import { Spacing, BorderRadius } from '../../src/theme';
+import { formatConversationTime } from '../../src/utils/conversation';
 
 interface Friend {
   id: string;
@@ -41,6 +42,7 @@ interface FriendRequest {
 
 interface SentRequest {
   id: string;
+  createdAt: string;
   receiver: Friend;
 }
 
@@ -59,7 +61,7 @@ type FriendSection = {
 };
 
 export default function FriendsScreen() {
-  const { colors, fonts, t } = useSettingsStore();
+  const { colors, fonts, t, language } = useSettingsStore();
   const refreshFriendStats = useNotificationStore((s) => s.refreshFriendStats);
   const friendsFocus = useNotificationStore((s) => s.friendsFocus);
   const setFriendsFocus = useNotificationStore((s) => s.setFriendsFocus);
@@ -72,6 +74,8 @@ export default function FriendsScreen() {
   const [searchFocused, setSearchFocused] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [pendingUserIds, setPendingUserIds] = useState<Set<string>>(new Set());
+
+  const locale = language === 'sw' ? 'sw-KE' : undefined;
 
   useEffect(() => {
     if (friendsFocus === 'requests') {
@@ -299,25 +303,32 @@ export default function FriendsScreen() {
   );
 
   const renderPendingSent = (item: SentRequest) => (
-    <View style={[styles.item, styles.pendingItem, { backgroundColor: colors.surface, borderColor: colors.warning + '30' }]}>
-      <Avatar avatarId={item.receiver.avatarId} size={48} />
+    <View style={[styles.item, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Avatar avatarId={item.receiver.avatarId} size={48} showOnline isOnline={item.receiver.status === 'ONLINE'} />
       <View style={styles.itemContent}>
-        <View style={styles.pendingRow}>
-          <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]}>
+        <View style={styles.chatHeaderRow}>
+          <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]} numberOfLines={1}>
             {item.receiver.firstName} {item.receiver.lastName}
           </Text>
-          <View style={[styles.pendingPill, { backgroundColor: colors.warning + '20' }]}>
-            <Text style={{ color: colors.warning, fontSize: fonts.xs, fontWeight: '600' }}>
-              {t.friends.pendingLabel}
-            </Text>
-          </View>
+          <Text style={[styles.itemTime, { color: colors.textTertiary, fontSize: fonts.xs }]}>
+            {item.createdAt ? formatConversationTime(item.createdAt, locale) : ''}
+          </Text>
         </View>
-        <Text style={[styles.itemSub, { color: colors.textSecondary, fontSize: fonts.sm }]}>
-          @{item.receiver.username} · {t.friends.waitingForAccept}
+        <Text style={[styles.itemSub, { color: colors.textSecondary, fontSize: fonts.sm }]} numberOfLines={1}>
+          @{item.receiver.username}
+        </Text>
+        <Text style={[styles.itemSub, { color: colors.textTertiary, fontSize: fonts.sm }]} numberOfLines={1}>
+          {t.friends.waitingForResponse}
         </Text>
       </View>
       <View style={styles.sentActions}>
-        <Button title={t.friends.startChat} onPress={() => handleStartChat(item.receiver.id)} size="sm" variant="outline" />
+        <TouchableOpacity
+          style={[styles.actionBtn, { backgroundColor: colors.primary + '15' }]}
+          onPress={() => handleStartChat(item.receiver.id)}
+          accessibilityLabel={t.friends.startChat}
+        >
+          <Ionicons name="chatbubble-outline" size={18} color={colors.primary} />
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionBtn, { backgroundColor: colors.danger + '20' }]}
           onPress={() => handleCancelRequest(item.id, item.receiver.id)}
@@ -544,7 +555,9 @@ const styles = StyleSheet.create({
   },
   pendingItem: { borderWidth: 1.5 },
   itemContent: { flex: 1 },
-  itemName: { fontWeight: '600' },
+  chatHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
+  itemName: { fontWeight: '600', flex: 1 },
+  itemTime: { flexShrink: 0 },
   itemSub: { marginTop: 2 },
   pendingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flexWrap: 'wrap' },
   requestActions: { flexDirection: 'row', gap: Spacing.sm },

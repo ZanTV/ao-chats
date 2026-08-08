@@ -29,6 +29,10 @@ function getVerifyExpiry(): Date {
   return new Date(Date.now() + config.verifyCodeExpiryMs);
 }
 
+function getResetExpiry(): Date {
+  return new Date(Date.now() + config.resetCodeExpiryMs);
+}
+
 function normalizeCode(code: string): string {
   return code.trim().replace(/\s/g, '');
 }
@@ -255,28 +259,82 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (!user) return { message: 'If the email exists, a reset code has been sent' };
 
+    const now = Date.now();
+    if (
+      user.resetSentAt &&
+      now - user.resetSentAt.getTime() < config.passwordResetResendCooldownMs
+    ) {
+      throw new AppError(
+        429,
+        'Please wait before requesting another code',
+        'RESET_COOLDOWN'
+      );
+    }
+
     const resetCode = generateVerificationCode();
+    const resetTokenHash = await hashPassword(resetCode);
+
+    try {
+      await sendPasswordResetEmail(user.email, resetCode, user.firstName);
+    } catch {
+      throw new AppError(
+        503,
+        "We couldn't send the verification code. Please try again.",
+        'EMAIL_SEND_FAILED'
+      );
+    }
+
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        resetToken: resetCode,
-        resetTokenExpiry: getVerifyExpiry(),
+        resetToken: resetTokenHash,
+        resetTokenExpiry: getResetExpiry(),
+        resetAttempts: 0,
+        resetSentAt: new Date(),
       },
     });
 
-    await sendPasswordResetEmail(user.email, resetCode, user.firstName);
     return { message: 'If the email exists, a reset code has been sent' };
   }
 
   async resetPassword(email: string, code: string, newPassword: string) {
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-    if (!user) throw new AppError(400, 'Invalid reset request');
-    if (user.resetToken !== code) throw new AppError(400, 'Invalid reset code');
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user || !user.resetToken) {
+      throw new AppError(400, 'Invalid reset request', 'INVALID_RESET');
+    }
+
     if (user.resetTokenExpiry && user.resetTokenExpiry < new Date()) {
-      throw new AppError(400, 'Reset code expired');
+      throw new AppError(
+        400,
+        'This code has expired. Please request a new one.',
+        'RESET_EXPIRED'
+      );
+    }
+
+    if (user.resetAttempts >= 5) {
+      throw new AppError(
+        429,
+        'Too many attempts. Please request a new code.',
+        'RESET_ATTEMPTS'
+      );
+    }
+
+    const valid = await comparePassword(normalizeCode(code), user.resetToken);
+    if (!valid) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { resetAttempts: { increment: 1 } },
+      });
+      throw new AppError(
+        400,
+        'The verification code is incorrect',
+        'INVALID_RESET_CODE'
+      );
     }
 
     const passwordHash = await hashPassword(newPassword);
@@ -286,6 +344,8 @@ export class AuthService {
         passwordHash,
         resetToken: null,
         resetTokenExpiry: null,
+        resetAttempts: 0,
+        resetSentAt: null,
       },
     });
 

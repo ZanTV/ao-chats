@@ -33,7 +33,7 @@ import { useChatComposerStore } from '../../src/stores/chatComposerStore';
 import { useTypingStore } from '../../src/stores/typingStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
-import { cacheManager, MESSAGE_PAGE_SIZE } from '../../src/cache';
+import { cacheManager, CacheDomain, MESSAGE_PAGE_SIZE } from '../../src/cache';
 import { dedupeSocketHandler } from '../../src/utils/socketDedup';
 import { ApiError } from '../../src/utils/validation';
 import {
@@ -117,6 +117,7 @@ export default function ChatScreen() {
   const [showScrollDown, setShowScrollDown] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
+  const inputRef = useRef<TextInput>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const draftSaveTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const inputTextRef = useRef('');
@@ -276,11 +277,11 @@ export default function ChatScreen() {
     }
   }, [conversationId, user?.id]);
 
-  const clearSelection = () => {
+  const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
     setSelectionMode(false);
     setActionTarget(null);
-  };
+  }, []);
 
   const toggleSelect = (message: Message) => {
     setSelectedIds((prev) => {
@@ -293,6 +294,18 @@ export default function ChatScreen() {
     });
     setActionTarget(message);
   };
+
+  const selectMessageForAction = (message: Message) => {
+    setSelectedIds(new Set([message.id]));
+    setSelectionMode(true);
+    setActionTarget(message);
+  };
+
+  const handleSwipeReply = useCallback((message: Message) => {
+    clearSelection();
+    setReplyTo(message);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [clearSelection]);
 
   const scrollToMessage = useCallback(async (messageId: string) => {
     if (!conversationId) return;
@@ -757,34 +770,66 @@ export default function ChatScreen() {
     setEditText('');
   };
 
-  const handleClearChat = useCallback(() => {
+  const handleDeleteChat = useCallback(() => {
     if (!conversationId) return;
-    Alert.alert(t.chat.clearChat, t.chat.clearChatConfirm, [
+    Alert.alert(t.home.deleteChatTitle, t.home.deleteChatMessage, [
       { text: t.common.cancel, style: 'cancel' },
       {
-        text: t.chat.clearChat,
+        text: t.common.delete,
         style: 'destructive',
         onPress: async () => {
           try {
-            applyMessages([]);
-            setPinnedMessages([]);
-            setPinnedIds(new Set());
-            setPinnedEntries([]);
-            setShowUnreadDivider(false);
-            setReplyTo(null);
-            setEditingMessage(null);
-            setEditText('');
-            await cacheManager.clearConversationMessages(conversationId);
-            useChatComposerStore.getState().clearDraft(conversationId);
-            await api.clearConversation(conversationId);
+            const cached = cacheManager.get<Array<{ id: string }>>(CacheDomain.CONVERSATIONS);
+            const previous = cached?.data ?? [];
+            const next = previous.filter((c) => c.id !== conversationId);
+            cacheManager.set(CacheDomain.CONVERSATIONS, next);
+            await api.hideConversation(conversationId);
+            router.back();
           } catch (err) {
-            await loadMessages();
-            Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
+            Alert.alert(t.common.error, err instanceof Error ? err.message : t.home.deleteFailed);
           }
         },
       },
     ]);
-  }, [conversationId, applyMessages, loadMessages, t]);
+  }, [conversationId, t]);
+
+  const handleClearChat = useCallback(() => {
+    if (!conversationId) return;
+    Alert.alert(t.home.chatOptions, undefined, [
+      {
+        text: t.chat.clearChat,
+        onPress: () => {
+          Alert.alert(t.chat.clearChat, t.chat.clearChatConfirm, [
+            { text: t.common.cancel, style: 'cancel' },
+            {
+              text: t.chat.clearChat,
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  applyMessages([]);
+                  setPinnedMessages([]);
+                  setPinnedIds(new Set());
+                  setPinnedEntries([]);
+                  setShowUnreadDivider(false);
+                  setReplyTo(null);
+                  setEditingMessage(null);
+                  setEditText('');
+                  await cacheManager.clearConversationMessages(conversationId);
+                  useChatComposerStore.getState().clearDraft(conversationId);
+                  await api.clearConversation(conversationId);
+                } catch (err) {
+                  await loadMessages();
+                  Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
+                }
+              },
+            },
+          ]);
+        },
+      },
+      { text: t.home.deleteChat, style: 'destructive', onPress: handleDeleteChat },
+      { text: t.common.cancel, style: 'cancel' },
+    ]);
+  }, [conversationId, applyMessages, handleDeleteChat, loadMessages, t]);
 
   const primarySelected = getPrimarySelected();
   const hiddenActions: MessageAction[] = [];
@@ -912,8 +957,8 @@ export default function ChatScreen() {
             if (selectionMode) toggleSelect(message);
             else if (message.failed) retryMessage(message);
           }}
-          onLongPress={() => toggleSelect(message)}
-          onSwipeReply={() => setReplyTo(message)}
+          onLongPress={() => selectMessageForAction(message)}
+          onSwipeReply={() => handleSwipeReply(message)}
           onReplyPress={scrollToMessage}
           onReactionPress={(emoji) => handleReactionChipPress(message, emoji)}
           deletedLabel={t.chat.deletedMessage}
@@ -921,7 +966,6 @@ export default function ChatScreen() {
           seeMoreLabel={t.chat.seeMore}
           seeLessLabel={t.chat.seeLess}
           editedLabel={t.chat.edited}
-          pressHighlight={colors.pressHighlight}
         />
       </View>
     );
@@ -1100,6 +1144,7 @@ export default function ChatScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.inputBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
           <TextInput
+            ref={inputRef}
             style={[
               styles.textInput,
               {

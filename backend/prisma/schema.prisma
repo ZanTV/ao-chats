@@ -61,6 +61,8 @@ model User {
   emailVerifyExpiry DateTime?    @map("email_verify_expiry")
   resetToken        String?      @map("reset_token")
   resetTokenExpiry  DateTime?    @map("reset_token_expiry")
+  resetAttempts     Int          @default(0) @map("reset_attempts")
+  resetSentAt       DateTime?    @map("reset_sent_at")
   lastSeen          DateTime?    @map("last_seen")
   isVerified        Boolean      @default(false) @map("is_verified")
   isSystemAccount   Boolean      @default(false) @map("is_system_account")
@@ -164,6 +166,7 @@ model Participant {
   isPinned       Boolean   @default(false) @map("is_pinned")
   lastReadAt     DateTime? @map("last_read_at")
   clearedAt      DateTime? @map("cleared_at")
+  hiddenAt       DateTime? @map("hidden_at")
   joinedAt       DateTime  @default(now()) @map("joined_at")
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

@@ -27,6 +27,7 @@ export async function emitConversationUpdated(
     unreadCount?: number;
     targetUserId?: string;
     clearLastMessage?: boolean;
+    removeFromList?: boolean;
   }
 ) {
   const participants = await prisma.participant.findMany({
@@ -93,6 +94,11 @@ export async function emitConversationUpdated(
             ? lastMessage.readAt
             : lastMessage.readAt.toISOString()
           : undefined,
+        waitingAt: (lastMessage as { waitingAt?: Date | string | null }).waitingAt
+          ? typeof (lastMessage as { waitingAt?: Date | string }).waitingAt === 'string'
+            ? (lastMessage as { waitingAt?: string }).waitingAt
+            : (lastMessage as { waitingAt?: Date }).waitingAt?.toISOString()
+          : undefined,
         isEdited: lastMessage.isEdited,
       };
     }
@@ -101,6 +107,7 @@ export async function emitConversationUpdated(
       conversationId,
       updatedAt,
       lastMessage: payloadLastMessage,
+      removeFromList: options?.removeFromList === true,
       unreadCount:
         options?.readerId === userId
           ? 0
