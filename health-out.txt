@@ -1,1 +1,0 @@
-{"success":true,"status":"ok","message":"AO Chats API","version":"2.0.0","environment":"production","timestamp":"2026-08-08T03:03:30.108Z","database":"connected","redis":"connected","socketIo":"connected","services":{"database":"connected","redis":"connected"}}
