@@ -16,7 +16,63 @@ This was **not** a Vercel problem — the web app cannot load data when the Rend
 
 ## Fix in Render Dashboard (do this now)
 
+Your service uses **Docker** (not Native Node), so you will see **Dockerfile path** and **Docker Command** — not Build/Start Command.
+
 Open **Render → ao-chats-api → Settings**:
+
+### Build (Docker)
+
+| Setting | Value |
+|---------|--------|
+| **Branch** | `main` |
+| **Root Directory** | `backend` |
+| **Dockerfile Path** | `Dockerfile` |
+| **Registry Credential** | *(leave empty — uses GitHub)* |
+| **Build Filter** | *(leave empty)* |
+
+### Deploy
+
+| Setting | Value |
+|---------|--------|
+| **Docker Command** | *(leave empty — uses Dockerfile `CMD`)* |
+
+Or, if Render requires a value:
+
+```text
+node dist/index.js
+```
+
+### Health check
+
+**Settings → Health & Alerts** (or similar):
+
+| Setting | Value |
+|---------|--------|
+| **Health Check Path** | `/health/live` |
+
+### Environment
+
+Paste all vars from `backend/.env.production` under **Environment**.
+
+Then **Manual Deploy → Deploy latest commit**.
+
+---
+
+### Alternative: switch to Native Node (optional)
+
+If you prefer **Build Command** / **Start Command** fields:
+
+1. Create a **new Web Service** on Render
+2. Choose **Language: Node** (not Docker)
+3. Root Directory: `backend`
+4. Build: `npm install && npm run build`
+5. Start: `node dist/index.js`
+6. Health: `/health/live`
+7. Move env vars + custom domain `api.aochats.chat` to the new service
+
+---
+
+### Old Native Node table (only if runtime = Node, not Docker)
 
 | Setting | Must be |
 |---------|---------|
@@ -24,10 +80,6 @@ Open **Render → ao-chats-api → Settings**:
 | **Build Command** | `npm install && npm run build` |
 | **Start Command** | `node dist/index.js` |
 | **Health Check Path** | `/health/live` |
-
-Then **Environment** — paste all vars from `backend/.env.production` (never commit that file).
-
-Click **Manual Deploy → Deploy latest commit**.
 
 ## Verify
 
