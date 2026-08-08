@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -14,9 +14,18 @@ import { MessageBubble } from './MessageBubble';
 import { Spacing } from '../../theme';
 import { clampOpacity } from '../../utils/reanimatedColors';
 
-const SWIPE_THRESHOLD = 40;
-const MAX_SWIPE = 76;
-const ACTIVE_X = 12;
+/** Must move this far right before reply can activate */
+const SWIPE_THRESHOLD = 56;
+const MAX_SWIPE = 80;
+/** Dead-zone before pan activates (px). Higher = scroll-friendlier */
+const ACTIVE_X = 28;
+/**
+ * If finger moves this far vertically before horizontal activation,
+ * the pan fails and FlatList scroll wins.
+ */
+const FAIL_Y = 10;
+/** Horizontal must dominate vertical (dx > dy * ratio) */
+const HORIZONTAL_RATIO = 1.35;
 
 interface ThemeColors {
   bubbleSent: string;
@@ -85,6 +94,11 @@ function BubbleContent(props: Props) {
   );
 }
 
+function isHorizontalReplyGesture(dx: number, dy: number): boolean {
+  if (dx < SWIPE_THRESHOLD) return false;
+  return Math.abs(dx) > Math.abs(dy) * HORIZONTAL_RATIO;
+}
+
 function SwipeableMessageRowNative(props: Props) {
   const translateX = useSharedValue(0);
   const onSwipeReplyRef = useRef(props.onSwipeReply);
@@ -95,17 +109,24 @@ function SwipeableMessageRowNative(props: Props) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
   }, []);
 
-  // Pan only — tap/long-press stay on Pressable so scroll + swipe don't fight.
   const pan = Gesture.Pan()
     .activeOffsetX([ACTIVE_X, 9999])
-    .failOffsetY([-18, 18])
+    .failOffsetY([-FAIL_Y, FAIL_Y])
     .onUpdate((e) => {
-      translateX.value = Math.min(Math.max(e.translationX, 0) * 0.92, MAX_SWIPE);
+      // Extra guard: if vertical starts winning mid-gesture, collapse swipe UI
+      if (Math.abs(e.translationY) > Math.abs(e.translationX) * 0.9 && e.translationX < ACTIVE_X + 8) {
+        translateX.value = withSpring(0, { damping: 24, stiffness: 320 });
+        return;
+      }
+      translateX.value = Math.min(Math.max(e.translationX, 0) * 0.88, MAX_SWIPE);
     })
     .onEnd((e) => {
-      if (e.translationX >= SWIPE_THRESHOLD || e.velocityX > 650) {
+      if (isHorizontalReplyGesture(e.translationX, e.translationY)) {
         runOnJS(fireReply)();
       }
+      translateX.value = withSpring(0, { damping: 20, stiffness: 260 });
+    })
+    .onFinalize(() => {
       translateX.value = withSpring(0, { damping: 20, stiffness: 260 });
     });
 
@@ -130,7 +151,7 @@ function SwipeableMessageRowNative(props: Props) {
         <Pressable
           onPress={props.onPress}
           onLongPress={props.onLongPress}
-          delayLongPress={250}
+          delayLongPress={280}
           style={styles.pressWrap}
         >
           <BubbleContent {...props} />
@@ -140,20 +161,94 @@ function SwipeableMessageRowNative(props: Props) {
   );
 }
 
-export function SwipeableMessageRow(props: Props) {
-  if (Platform.OS === 'web') {
-    return (
+type AxisLock = 'none' | 'h' | 'v';
+
+/**
+ * Web/mobile-browser swipe-to-reply.
+ * Vertical scroll always wins once the gesture is classified as vertical.
+ */
+function SwipeableMessageRowWeb(props: Props) {
+  const startRef = useRef<{ x: number; y: number } | null>(null);
+  const lockRef = useRef<AxisLock>('none');
+  const [tx, setTx] = useState(0);
+
+  const reset = () => {
+    startRef.current = null;
+    lockRef.current = 'none';
+    setTx(0);
+  };
+
+  const handlers = {
+    onTouchStart: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+      startRef.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+      lockRef.current = 'none';
+      setTx(0);
+    },
+    onTouchMove: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+      if (!startRef.current || lockRef.current === 'v') return;
+      const dx = e.nativeEvent.pageX - startRef.current.x;
+      const dy = e.nativeEvent.pageY - startRef.current.y;
+      const adx = Math.abs(dx);
+      const ady = Math.abs(dy);
+
+      if (lockRef.current === 'none') {
+        if (ady > FAIL_Y && ady >= adx * 0.85) {
+          lockRef.current = 'v';
+          setTx(0);
+          return;
+        }
+        if (dx > ACTIVE_X && adx > ady * HORIZONTAL_RATIO) {
+          lockRef.current = 'h';
+        } else {
+          return;
+        }
+      }
+
+      if (lockRef.current === 'h') {
+        setTx(Math.min(Math.max(dx, 0) * 0.88, MAX_SWIPE));
+      }
+    },
+    onTouchEnd: () => {
+      if (lockRef.current === 'h' && tx >= SWIPE_THRESHOLD) {
+        props.onSwipeReply();
+      }
+      reset();
+    },
+    onTouchCancel: reset,
+  };
+
+  const progress = Math.min(1, tx / SWIPE_THRESHOLD);
+
+  return (
+    <View
+      style={[styles.row, props.compactBottom && styles.rowCompact, { transform: [{ translateX: tx }] }]}
+      {...handlers}
+    >
+      <View
+        pointerEvents="none"
+        style={[
+          styles.replyHint,
+          { opacity: progress, transform: [{ scale: 0.82 + progress * 0.18 }] },
+        ]}
+      >
+        <Ionicons name="arrow-undo" size={20} color={props.colors.primary} />
+      </View>
       <Pressable
         onPress={props.onPress}
         onLongPress={props.onLongPress}
-        delayLongPress={250}
-        style={[styles.row, props.compactBottom && styles.rowCompact]}
+        delayLongPress={280}
+        style={styles.pressWrap}
       >
         <BubbleContent {...props} />
       </Pressable>
-    );
-  }
+    </View>
+  );
+}
 
+export function SwipeableMessageRow(props: Props) {
+  if (Platform.OS === 'web') {
+    return <SwipeableMessageRowWeb {...props} />;
+  }
   return <SwipeableMessageRowNative {...props} />;
 }
 

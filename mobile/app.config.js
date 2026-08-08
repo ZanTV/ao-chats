@@ -29,6 +29,8 @@ module.exports = ({ config }) => ({
       backgroundColor: '#2563EB',
     },
     package: 'com.aochats.app',
+    // Resize window when keyboard opens so composer stays visible above it
+    softwareKeyboardLayoutMode: 'resize',
     intentFilters: [
       {
         action: 'VIEW',

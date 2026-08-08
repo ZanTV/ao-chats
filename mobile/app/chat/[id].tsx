@@ -53,6 +53,7 @@ import { setActiveConversation } from '../../src/services/activeConversation';
 import { playIncomingChatFeedback, playOutgoingChatFeedback } from '../../src/services/feedbackService';
 import * as Haptics from 'expo-haptics';
 import { Spacing, BorderRadius } from '../../src/theme';
+import { useChatKeyboardInset } from '../../src/hooks/useChatKeyboardInset';
 
 type Message = ChatMessage;
 
@@ -91,6 +92,7 @@ export default function ChatScreen() {
   const { user } = useAuthStore();
   const { colors, fonts, t } = useSettingsStore();
   const { markConversationNotificationsRead } = useNotificationStore();
+  const keyboardInset = useChatKeyboardInset();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -1185,7 +1187,15 @@ export default function ChatScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={['top', 'left', 'right']}
+    >
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
       <View style={[styles.chatHeader, { backgroundColor: colors.headerBackground, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={goBack} style={styles.backBtn}>
           <Ionicons name={selectionMode ? 'close' : 'arrow-back'} size={24} color={colors.text} />
@@ -1346,25 +1356,34 @@ export default function ChatScreen() {
         </View>
       )}
 
-      {replyTo && !editingMessage && (
-        <ReplyPreviewBar
-          replyTo={replyTo}
-          senderName={
-            replyTo.senderId === user?.id
-              ? t.chat.you
-              : otherUser?.firstName || ''
-          }
-          replyLabel={t.chat.reply}
-          deletedLabel={t.chat.deletedMessage}
-          onClose={() => setReplyTo(null)}
-          onPress={() => scrollToMessage(replyTo.id)}
-          colors={colors}
-          fonts={fonts}
-        />
-      )}
+      <View
+        style={[
+          styles.composerWrap,
+          {
+            backgroundColor: colors.surface,
+            borderTopColor: colors.border,
+            paddingBottom: Platform.OS === 'web' ? keyboardInset : 0,
+          },
+        ]}
+      >
+        {replyTo && !editingMessage && (
+          <ReplyPreviewBar
+            replyTo={replyTo}
+            senderName={
+              replyTo.senderId === user?.id
+                ? t.chat.you
+                : otherUser?.firstName || ''
+            }
+            replyLabel={t.chat.reply}
+            deletedLabel={t.chat.deletedMessage}
+            onClose={() => setReplyTo(null)}
+            onPress={() => scrollToMessage(replyTo.id)}
+            colors={colors}
+            fonts={fonts}
+          />
+        )}
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[styles.inputBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+        <View style={[styles.inputBar, { backgroundColor: colors.surface }]}>
           <TextInput
             ref={inputRef}
             style={[
@@ -1382,6 +1401,13 @@ export default function ChatScreen() {
             onChangeText={editingMessage ? setEditText : handleTyping}
             multiline
             maxLength={5000}
+            blurOnSubmit={false}
+            textAlignVertical="top"
+            onFocus={() => {
+              if (stickToBottomRef.current) {
+                requestAnimationFrame(() => scrollToLatest(true));
+              }
+            }}
           />
           {editingMessage ? (
             <TouchableOpacity
@@ -1401,7 +1427,7 @@ export default function ChatScreen() {
             </TouchableOpacity>
           )}
         </View>
-      </KeyboardAvoidingView>
+      </View>
 
       <ReactionPicker
         visible={showReactionPicker}
@@ -1509,12 +1535,14 @@ export default function ChatScreen() {
         colors={colors}
         fonts={fonts}
       />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  flex: { flex: 1 },
   chatHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1553,13 +1581,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   emptyChat: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
+  composerWrap: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     padding: Spacing.sm,
     paddingHorizontal: Spacing.md,
     gap: Spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
   },
   textInput: {
     flex: 1,
