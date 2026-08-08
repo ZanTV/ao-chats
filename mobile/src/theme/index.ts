@@ -92,6 +92,8 @@ export const BorderRadius = {
   full: 9999,
 };
 
+export { ComposerLayout } from './composer';
+
 export const FontSize = {
   small: { xs: 11, sm: 13, md: 15, lg: 17, xl: 20, xxl: 24, title: 28 },
   medium: { xs: 12, sm: 14, md: 16, lg: 18, xl: 22, xxl: 26, title: 32 },

@@ -92,6 +92,7 @@ export const en = {
   },
   chat: {
     typeMessage: 'Type a message...',
+    send: 'Send',
     online: 'Online',
     offline: 'Offline',
     typing: 'typing...',
@@ -353,6 +354,7 @@ export const sw: typeof en = {
   },
   chat: {
     typeMessage: 'Andika ujumbe...',
+    send: 'Tuma',
     online: 'Mtandaoni',
     offline: 'Nje ya mtandao',
     typing: 'anaandika...',

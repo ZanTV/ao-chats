@@ -81,11 +81,12 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: Spacing.sm,
+    paddingVertical: Spacing.xs,
     paddingHorizontal: Spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: Spacing.sm,
+    maxHeight: 64,
   },
   bar: { width: 3.5, alignSelf: 'stretch', borderRadius: 4 },
   content: { flex: 1 },

@@ -22,6 +22,7 @@ import { Avatar } from '../../src/components/Avatar';
 import { SwipeableMessageRow } from '../../src/components/chat/SwipeableMessageRow';
 import { MessageActionBar, MessageAction } from '../../src/components/chat/MessageActionBar';
 import { ReplyPreviewBar } from '../../src/components/chat/ReplyPreviewBar';
+import { ChatComposerField } from '../../src/components/chat/ChatComposerField';
 import { ReactionPicker } from '../../src/components/chat/ReactionPicker';
 import { AOEmojiPicker } from '../../src/components/emoji/AOEmojiPicker';
 import { ForwardSheet } from '../../src/components/chat/ForwardSheet';
@@ -1418,16 +1419,16 @@ export default function ChatScreen() {
           />
         )}
 
-        <View style={[styles.inputBar, { backgroundColor: colors.surface }]}>
-          <TouchableOpacity
-            style={[
-              styles.emojiToggle,
-              {
-                backgroundColor: showComposerEmoji ? colors.primary + '18' : colors.inputBackground,
-                borderColor: colors.inputBorder,
-              },
-            ]}
-            onPress={() => {
+        <View style={styles.inputBar}>
+          <ChatComposerField
+            ref={inputRef}
+            value={editingMessage ? editText : inputText}
+            onChangeText={editingMessage ? setEditText : handleTyping}
+            placeholder={editingMessage ? t.chat.editMessage : t.chat.typeMessage}
+            emojiOpen={showComposerEmoji}
+            canSubmit={editingMessage ? !!editText.trim() : !!inputText.trim()}
+            submitMode={editingMessage ? 'save' : 'send'}
+            onEmojiPress={() => {
               if (showComposerEmoji) {
                 setShowComposerEmoji(false);
                 requestAnimationFrame(() => inputRef.current?.focus());
@@ -1436,58 +1437,24 @@ export default function ChatScreen() {
               Keyboard.dismiss();
               setShowComposerEmoji(true);
             }}
-            accessibilityLabel={t.chat.searchEmoji}
-            hitSlop={6}
-          >
-            <Ionicons
-              name={showComposerEmoji ? 'keypad-outline' : 'happy-outline'}
-              size={24}
-              color={showComposerEmoji ? colors.primary : colors.textSecondary}
-            />
-          </TouchableOpacity>
-          <TextInput
-            ref={inputRef}
-            style={[
-              styles.textInput,
-              {
-                backgroundColor: colors.inputBackground,
-                color: colors.text,
-                fontSize: fonts.md,
-                borderColor: colors.inputBorder,
-              },
-            ]}
-            placeholder={editingMessage ? t.chat.editMessage : t.chat.typeMessage}
-            placeholderTextColor={colors.textTertiary}
-            value={editingMessage ? editText : inputText}
-            onChangeText={editingMessage ? setEditText : handleTyping}
-            multiline
-            maxLength={5000}
-            blurOnSubmit={false}
-            textAlignVertical="top"
+            onSubmit={editingMessage ? handleSaveEdit : handleSend}
             onFocus={() => {
               if (showComposerEmoji) setShowComposerEmoji(false);
               if (stickToBottomRef.current) {
                 requestAnimationFrame(() => scrollToLatest(true));
               }
             }}
+            onContentHeightChange={() => {
+              if (stickToBottomRef.current) {
+                requestAnimationFrame(() => scrollToLatest(false));
+              }
+            }}
+            colors={colors}
+            fonts={fonts}
+            emojiAccessibilityLabel={t.chat.searchEmoji}
+            sendAccessibilityLabel={editingMessage ? t.chat.saveEdit : t.chat.send}
+            inputAccessibilityLabel={editingMessage ? t.chat.editMessage : t.chat.typeMessage}
           />
-          {editingMessage ? (
-            <TouchableOpacity
-              style={[styles.sendButton, { backgroundColor: editText.trim() ? colors.primary : colors.border }]}
-              onPress={handleSaveEdit}
-              disabled={!editText.trim()}
-            >
-              <Ionicons name="checkmark" size={22} color="#FFF" />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[styles.sendButton, { backgroundColor: inputText.trim() ? colors.primary : colors.border }]}
-              onPress={handleSend}
-              disabled={!inputText.trim()}
-            >
-              <Ionicons name="send" size={20} color="#FFF" />
-            </TouchableOpacity>
-          )}
         </View>
 
         <AOEmojiPicker
@@ -1674,27 +1641,9 @@ const styles = StyleSheet.create({
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    padding: Spacing.sm,
     paddingHorizontal: Spacing.md,
-    gap: Spacing.sm,
-  },
-  emojiToggle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  textInput: {
-    flex: 1,
-    borderRadius: BorderRadius.xl,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 2,
-    maxHeight: 120,
-    minHeight: 44,
-    borderWidth: 1,
-    textAlignVertical: 'top',
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.sm,
   },
   editBar: {
     flexDirection: 'row',
@@ -1704,5 +1653,4 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  sendButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
 });
