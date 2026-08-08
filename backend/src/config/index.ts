@@ -26,6 +26,10 @@ function env(name: string, fallback?: string): string {
   const value = process.env[name]?.trim();
   if (value) return value;
   if (fallback !== undefined) return fallback;
+  if (isProduction && isHostedPlatform()) {
+    console.error(`[AO Chats] Missing required environment variable: ${name}`);
+    return '';
+  }
   throw new Error(`Missing required environment variable: ${name}`);
 }
 

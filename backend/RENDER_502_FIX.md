@@ -50,9 +50,18 @@ node dist/index.js
 |---------|--------|
 | **Health Check Path** | `/health/live` |
 
-### Environment
+### Environment (CRITICAL after plan change)
 
-Paste all vars from `backend/.env.production` under **Environment**.
+When upgrading to **Starter** or recreating the service, **environment variables are often lost**.
+
+Render → **Environment** → paste **every** variable from `backend/.env.production`:
+
+- `DATABASE_URL`, `REDIS_URL`
+- `JWT_SECRET`, `JWT_REFRESH_SECRET`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`
+- `CLIENT_URL`, `CORS_ORIGIN`, `SOCKET_CORS_ORIGIN`
+
+Missing vars → `dynamic-paid-error` / **502** until restored.
 
 Then **Manual Deploy → Deploy latest commit**.
 

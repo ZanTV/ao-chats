@@ -21,4 +21,4 @@ COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/scripts ./scripts
 COPY package.json package-lock.json ./
 EXPOSE 3001
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "node scripts/render-boot-check.mjs; node dist/index.js"]

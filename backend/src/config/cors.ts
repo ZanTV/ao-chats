@@ -27,9 +27,10 @@ export function parseCorsOrigins(): string | string[] {
 
   if (!raw) {
     if (config.isProduction) {
-      throw new Error(
-        'Missing SOCKET_CORS_ORIGIN (or CORS_ORIGIN / CLIENT_URL) in production'
+      console.error(
+        '[AO Chats] Missing SOCKET_CORS_ORIGIN — using https://www.aochats.chat defaults'
       );
+      return expandOriginPairs(['https://www.aochats.chat', 'https://aochats.chat']);
     }
     return '*';
   }

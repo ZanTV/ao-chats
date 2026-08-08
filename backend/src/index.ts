@@ -150,16 +150,35 @@ function start() {
   httpServer.listen(config.port, '0.0.0.0', () => {
     console.log(`AO Chats API v2.0 running on port ${config.port}`);
     console.log(`Environment: ${config.nodeEnv}`);
+    if (isHostedPlatform()) {
+      console.log(`Platform: ${process.env.RENDER_SERVICE_NAME || 'Render'}`);
+    }
     if (config.isProduction) {
       console.log(`Client URL: ${config.clientUrl}`);
+      if (!config.databaseUrl) {
+        console.error('[AO Chats] DATABASE_URL is missing — API routes will fail until set in Render Environment');
+      }
     }
     scheduleBackgroundMigrations();
+  });
+
+  httpServer.on('error', (err) => {
+    console.error('[AO Chats] HTTP server error:', err);
+    process.exit(1);
   });
 
   void bootstrap().catch((err) => {
     console.error('Background bootstrap failed:', err instanceof Error ? err.message : err);
   });
 }
+
+process.on('uncaughtException', (err) => {
+  console.error('[AO Chats] Uncaught exception:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[AO Chats] Unhandled rejection:', reason);
+});
 
 start();
 
