@@ -113,11 +113,10 @@ export function MessageActionBar({
 
 const styles = StyleSheet.create({
   container: {
-    position: 'absolute',
-    top: Spacing.sm,
-    left: Spacing.md,
-    right: Spacing.md,
     zIndex: 100,
+    marginHorizontal: Spacing.md,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xs,
     borderRadius: BorderRadius.xl,
     borderWidth: 1,
     shadowColor: '#000',

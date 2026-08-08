@@ -125,6 +125,9 @@ export default function ChatScreen() {
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearingChat, setClearingChat] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteForEveryone, setDeleteForEveryone] = useState(false);
+  const [showDeleteMenu, setShowDeleteMenu] = useState(false);
 
   const flatListRef = useRef<RNFlatList<ListItem>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -700,6 +703,32 @@ export default function ChatScreen() {
     return messages.find((m) => m.id === id) || null;
   };
 
+  const performDeleteMessages = useCallback(async (forEveryone: boolean) => {
+    if (!conversationId) return;
+    const ids = new Set(selectedIds);
+    if (actionTarget?.id) ids.add(actionTarget.id);
+    const idList = Array.from(ids);
+    if (idList.length === 0) return;
+
+    // Optimistic remove from UI first so delete feels instant
+    updateMessages((prev) => prev.filter((m) => !idList.includes(m.id)));
+    clearSelection();
+    setShowDeleteConfirm(false);
+    setShowDeleteMenu(false);
+
+    await Promise.all(
+      idList.map(async (id) => {
+        if (id.startsWith('temp-')) return;
+        try {
+          socketService.deleteMessage(id, conversationId, forEveryone);
+          await api.deleteMessage(id, forEveryone);
+        } catch {
+          // Keep local removal even if remote call fails
+        }
+      })
+    );
+  }, [conversationId, selectedIds, actionTarget, updateMessages, clearSelection]);
+
   const handleAction = (action: MessageAction) => {
     const message = getPrimarySelected();
     if (!message || !conversationId) return;
@@ -775,31 +804,19 @@ export default function ChatScreen() {
         }
         clearSelection();
         break;
-      case 'delete':
-        Alert.alert(t.chat.delete, undefined, [
-          {
-            text: t.chat.deleteForMe,
-            style: 'destructive',
-            onPress: () => {
-              updateMessages((prev) => prev.filter((m) => m.id !== message.id));
-              socketService.deleteMessage(message.id, conversationId, false);
-              clearSelection();
-            },
-          },
-          ...(isOwn
-            ? [{
-                text: t.chat.deleteForEveryone,
-                style: 'destructive' as const,
-                onPress: () => {
-                  updateMessages((prev) => prev.filter((m) => m.id !== message.id));
-                  socketService.deleteMessage(message.id, conversationId, true);
-                  clearSelection();
-                },
-              }]
-            : []),
-          { text: t.common.cancel, style: 'cancel' },
-        ]);
+      case 'delete': {
+        const selected = messages.filter((m) => selectedIds.has(m.id));
+        const allOwn =
+          selected.length > 0 &&
+          selected.every((m) => m.senderId === user?.id && !m.id.startsWith('temp-'));
+        if (allOwn || (selected.length === 0 && isOwn && !message.id.startsWith('temp-'))) {
+          setShowDeleteMenu(true);
+        } else {
+          setDeleteForEveryone(false);
+          setShowDeleteConfirm(true);
+        }
         break;
+      }
     }
   };
 
@@ -852,6 +869,30 @@ export default function ChatScreen() {
       },
     ],
     [t]
+  );
+
+  const deleteMenuItems = useMemo(
+    () => [
+      {
+        key: 'for-me',
+        label: t.chat.deleteForMe,
+        icon: 'trash-outline' as const,
+        destructive: true,
+        onPress: () => {
+          void performDeleteMessages(false);
+        },
+      },
+      {
+        key: 'for-everyone',
+        label: t.chat.deleteForEveryone,
+        icon: 'trash-bin-outline' as const,
+        destructive: true,
+        onPress: () => {
+          void performDeleteMessages(true);
+        },
+      },
+    ],
+    [t, performDeleteMessages]
   );
 
   const primarySelected = getPrimarySelected();
@@ -1100,6 +1141,8 @@ export default function ChatScreen() {
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
+          directionalLockEnabled
+          overScrollMode="never"
           onScroll={(e) => {
             const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
             const atBottom =
@@ -1288,6 +1331,16 @@ export default function ChatScreen() {
         fonts={fonts}
       />
 
+      <ChatHeaderMenu
+        visible={showDeleteMenu}
+        title={t.chat.delete}
+        items={deleteMenuItems}
+        onClose={() => setShowDeleteMenu(false)}
+        topOffset={Platform.OS === 'web' ? 72 : 60}
+        colors={colors}
+        fonts={fonts}
+      />
+
       <ConfirmDialog
         visible={showClearConfirm}
         title={t.chat.clearChat}
@@ -1299,6 +1352,23 @@ export default function ChatScreen() {
         onCancel={() => {
           if (!clearingChat) setShowClearConfirm(false);
         }}
+        colors={colors}
+        fonts={fonts}
+      />
+
+      <ConfirmDialog
+        visible={showDeleteConfirm}
+        title={t.chat.delete}
+        message={
+          deleteForEveryone
+            ? t.chat.deleteForEveryone
+            : t.chat.deleteForMe
+        }
+        confirmLabel={t.chat.delete}
+        cancelLabel={t.common.cancel}
+        destructive
+        onConfirm={() => { void performDeleteMessages(deleteForEveryone); }}
+        onCancel={() => setShowDeleteConfirm(false)}
         colors={colors}
         fonts={fonts}
       />

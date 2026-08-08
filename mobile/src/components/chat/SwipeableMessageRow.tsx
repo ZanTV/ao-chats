@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -14,8 +14,9 @@ import { MessageBubble } from './MessageBubble';
 import { Spacing } from '../../theme';
 import { clampOpacity } from '../../utils/reanimatedColors';
 
-const SWIPE_THRESHOLD = 44;
-const MAX_SWIPE = 72;
+const SWIPE_THRESHOLD = 40;
+const MAX_SWIPE = 76;
+const ACTIVE_X = 12;
 
 interface ThemeColors {
   bubbleSent: string;
@@ -58,60 +59,52 @@ interface Props {
   editedLabel?: string;
 }
 
+function BubbleContent(props: Props) {
+  return (
+    <MessageBubble
+      message={props.message}
+      isOwn={props.isOwn}
+      isSelected={props.isSelected}
+      isPinned={props.isPinned}
+      isHighlighted={props.isHighlighted}
+      colors={props.colors}
+      fonts={props.fonts}
+      formatTime={props.formatTime}
+      onReplyPress={props.onReplyPress}
+      onReactionPress={props.onReactionPress}
+      currentUserId={props.currentUserId}
+      deletedLabel={props.deletedLabel}
+      compactBottom={props.compactBottom}
+      seeMoreLabel={props.seeMoreLabel}
+      seeLessLabel={props.seeLessLabel}
+      editedLabel={props.editedLabel}
+    />
+  );
+}
+
 function SwipeableMessageRowNative(props: Props) {
   const translateX = useSharedValue(0);
+  const onSwipeReplyRef = useRef(props.onSwipeReply);
+  onSwipeReplyRef.current = props.onSwipeReply;
 
   const fireReply = useCallback(() => {
-    props.onSwipeReply();
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    }
-  }, [props]);
+    onSwipeReplyRef.current();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  }, []);
 
-  const firePress = useCallback(() => {
-    props.onPress();
-  }, [props]);
-
-  const fireLongPress = useCallback(() => {
-    props.onLongPress();
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    }
-  }, [props]);
-
-  const gesture = useMemo(() => {
-    const longPress = Gesture.LongPress()
-      .minDuration(280)
-      .maxDistance(12)
-      .onStart(() => {
-        runOnJS(fireLongPress)();
-      });
-
-    const tap = Gesture.Tap()
-      .maxDuration(250)
-      .onEnd(() => {
-        runOnJS(firePress)();
-      });
-
-    const pan = Gesture.Pan()
-      .activeOffsetX([20, 9999])
-      .failOffsetY([-14, 14])
-      .onUpdate((e) => {
-        if (e.translationX > 0) {
-          translateX.value = Math.min(e.translationX * 0.9, MAX_SWIPE);
-        } else {
-          translateX.value = 0;
-        }
-      })
-      .onEnd((e) => {
-        if (e.translationX >= SWIPE_THRESHOLD) {
-          runOnJS(fireReply)();
-        }
-        translateX.value = withSpring(0, { damping: 22, stiffness: 280 });
-      });
-
-    return Gesture.Exclusive(pan, Gesture.Race(longPress, tap));
-  }, [fireLongPress, firePress, fireReply, translateX]);
+  // Pan only — tap/long-press stay on Pressable so scroll + swipe don't fight.
+  const pan = Gesture.Pan()
+    .activeOffsetX([ACTIVE_X, 9999])
+    .failOffsetY([-18, 18])
+    .onUpdate((e) => {
+      translateX.value = Math.min(Math.max(e.translationX, 0) * 0.92, MAX_SWIPE);
+    })
+    .onEnd((e) => {
+      if (e.translationX >= SWIPE_THRESHOLD || e.velocityX > 650) {
+        runOnJS(fireReply)();
+      }
+      translateX.value = withSpring(0, { damping: 20, stiffness: 260 });
+    });
 
   const rowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
@@ -121,36 +114,24 @@ function SwipeableMessageRowNative(props: Props) {
     const progress = clampOpacity(translateX.value / SWIPE_THRESHOLD);
     return {
       opacity: progress,
-      transform: [{ scale: 0.84 + progress * 0.16 }],
+      transform: [{ scale: 0.82 + progress * 0.18 }],
     };
   });
 
   return (
-    <GestureDetector gesture={gesture}>
+    <GestureDetector gesture={pan}>
       <Animated.View style={[styles.row, props.compactBottom && styles.rowCompact, rowStyle]}>
-        <Animated.View style={[styles.replyHint, replyHintStyle]}>
+        <Animated.View pointerEvents="none" style={[styles.replyHint, replyHintStyle]}>
           <Ionicons name="arrow-undo" size={20} color={props.colors.primary} />
         </Animated.View>
-        <View style={styles.pressWrap}>
-          <MessageBubble
-            message={props.message}
-            isOwn={props.isOwn}
-            isSelected={props.isSelected}
-            isPinned={props.isPinned}
-            isHighlighted={props.isHighlighted}
-            colors={props.colors}
-            fonts={props.fonts}
-            formatTime={props.formatTime}
-            onReplyPress={props.onReplyPress}
-            onReactionPress={props.onReactionPress}
-            currentUserId={props.currentUserId}
-            deletedLabel={props.deletedLabel}
-            compactBottom={props.compactBottom}
-            seeMoreLabel={props.seeMoreLabel}
-            seeLessLabel={props.seeLessLabel}
-            editedLabel={props.editedLabel}
-          />
-        </View>
+        <Pressable
+          onPress={props.onPress}
+          onLongPress={props.onLongPress}
+          delayLongPress={250}
+          style={styles.pressWrap}
+        >
+          <BubbleContent {...props} />
+        </Pressable>
       </Animated.View>
     </GestureDetector>
   );
@@ -162,10 +143,10 @@ export function SwipeableMessageRow(props: Props) {
       <Pressable
         onPress={props.onPress}
         onLongPress={props.onLongPress}
-        delayLongPress={280}
+        delayLongPress={250}
         style={[styles.row, props.compactBottom && styles.rowCompact]}
       >
-        <MessageBubble {...props} />
+        <BubbleContent {...props} />
       </Pressable>
     );
   }
