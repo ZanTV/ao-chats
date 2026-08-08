@@ -55,6 +55,35 @@ async function refreshConversationPreviews(io: Server, conversationId: string) {
   }
 }
 
+export async function emitMessageDeleted(
+  io: Server,
+  payload: {
+    conversationId: string;
+    messageId: string;
+    forEveryone: boolean;
+    userId: string;
+  }
+) {
+  io.to(`conversation:${payload.conversationId}`).emit('message:delete', {
+    messageId: payload.messageId,
+    conversationId: payload.conversationId,
+    forEveryone: payload.forEveryone,
+    userId: payload.userId,
+  });
+
+  // Same user on another device (even if not currently in the room)
+  if (!payload.forEveryone) {
+    io.to(`user:${payload.userId}`).emit('message:delete', {
+      messageId: payload.messageId,
+      conversationId: payload.conversationId,
+      forEveryone: false,
+      userId: payload.userId,
+    });
+  }
+
+  await refreshConversationPreviews(io, payload.conversationId);
+}
+
 async function maybeRefreshLastMessageStatus(
   io: Server,
   conversationId: string,
@@ -282,14 +311,18 @@ export function setupSocketIO(httpServer: HttpServer): Server {
       forEveryone: boolean;
     }) => {
       try {
-        await messageService.deleteMessage(data.messageId, userId, data.forEveryone);
-        io.to(`conversation:${data.conversationId}`).emit('message:delete', {
+        const result = await messageService.deleteMessage(
+          data.messageId,
+          userId,
+          data.forEveryone
+        );
+        const conversationId = result.conversationId || data.conversationId;
+        await emitMessageDeleted(io, {
+          conversationId,
           messageId: data.messageId,
           forEveryone: data.forEveryone,
           userId,
         });
-
-        await refreshConversationPreviews(io, data.conversationId);
       } catch (err) {
         socket.emit('message:error', {
           error: err instanceof Error ? err.message : 'Failed to delete',

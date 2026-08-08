@@ -125,6 +125,10 @@ export const en = {
     seeMore: 'See more',
     seeLess: 'See less',
     scrollDown: 'Scroll down',
+    noPinned: 'No pinned messages',
+    messageUnavailable: 'This message is no longer available.',
+    unpinFailed: 'Could not unpin message. Please try again.',
+    deleteMessageFailed: 'Could not delete message. Please try again.',
   },
   friends: {
     title: 'Friends',
@@ -362,6 +366,10 @@ export const sw: typeof en = {
     seeMore: 'Ona zaidi',
     seeLess: 'Ona kidogo',
     scrollDown: 'Scroll chini',
+    noPinned: 'Hakuna ujumbe uliobandikwa',
+    messageUnavailable: 'Ujumbe huu haupatikani tena.',
+    unpinFailed: 'Imeshindikana kuondoa bandiko. Jaribu tena.',
+    deleteMessageFailed: 'Imeshindikana kufuta ujumbe. Jaribu tena.',
   },
   friends: {
     title: 'Marafiki',

@@ -35,6 +35,9 @@ interface ThemeColors {
   selectionRing?: string;
   selectionOverlaySent?: string;
   selectionOverlayReceived?: string;
+  jumpHighlightFrom?: string;
+  jumpHighlightTo?: string;
+  jumpHighlightRing?: string;
 }
 
 interface Props {
@@ -84,19 +87,27 @@ export function MessageBubble({
   useEffect(() => {
     if (isHighlighted) {
       highlight.value = withSequence(
-        withTiming(1, { duration: 180 }),
-        withTiming(0, { duration: 2200 })
+        withTiming(1, { duration: 160 }),
+        withTiming(1, { duration: 900 }),
+        withTiming(0, { duration: 700 })
       );
+    } else {
+      highlight.value = withTiming(0, { duration: 200 });
     }
   }, [isHighlighted, highlight]);
+
+  const highlightFrom = colors.jumpHighlightFrom || MESSAGE_HIGHLIGHT_FROM;
+  const highlightTo = colors.jumpHighlightTo || MESSAGE_HIGHLIGHT_TO;
+  const jumpRing = colors.jumpHighlightRing || '#D97706';
 
   const highlightStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(
       highlight.value,
       [0, 1],
-      [MESSAGE_HIGHLIGHT_FROM, MESSAGE_HIGHLIGHT_TO]
+      [highlightFrom, highlightTo]
     ),
-  }));
+    transform: [{ scale: 1 + highlight.value * 0.015 }],
+  }), [highlightFrom, highlightTo]);
 
   const status = getAoMessageStatus(message, isOwn);
   const groupedReactions = message.reactions.reduce((acc, r) => {
@@ -153,6 +164,15 @@ export function MessageBubble({
             shadowRadius: 8,
             shadowOffset: { width: 0, height: 2 },
             elevation: 6,
+          },
+          isHighlighted && !isSelected && {
+            borderWidth: 2,
+            borderColor: jumpRing,
+            shadowColor: jumpRing,
+            shadowOpacity: 0.35,
+            shadowRadius: 10,
+            shadowOffset: { width: 0, height: 0 },
+            elevation: 5,
           },
           isPinned && styles.pinnedBubble,
           message.isForwarded && styles.forwardedBubble,

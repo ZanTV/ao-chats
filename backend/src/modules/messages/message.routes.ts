@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { messageService } from './message.service';
 import { createAndDispatchMessage } from '../../sockets/message.dispatch';
-import { getIO } from '../../sockets';
+import { getIO, emitMessageDeleted } from '../../sockets';
 import {
   sendMessageSchema,
   reactMessageSchema,
@@ -146,11 +146,23 @@ router.delete(
   '/:messageId',
   asyncHandler(async (req: AuthRequest, res) => {
     const forEveryone = req.query.forEveryone === 'true';
+    const messageId = paramId(req.params.messageId);
     const result = await messageService.deleteMessage(
-      paramId(req.params.messageId),
+      messageId,
       req.userId!,
       forEveryone
     );
+
+    const io = getIO();
+    if (io) {
+      await emitMessageDeleted(io, {
+        conversationId: result.conversationId,
+        messageId,
+        forEveryone,
+        userId: req.userId!,
+      });
+    }
+
     res.json(result);
   })
 );

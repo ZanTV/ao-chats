@@ -39,6 +39,20 @@ export async function sqliteUpsertMessages(
   upsertWebMessages(conversationId, messages);
 }
 
+export async function sqliteDeleteMessages(
+  conversationId: string,
+  messageIds: string[]
+): Promise<void> {
+  if (messageIds.length === 0) return;
+  const existing = webMessages.get(conversationId);
+  if (!existing) return;
+  const remove = new Set(messageIds);
+  webMessages.set(
+    conversationId,
+    existing.filter((m) => !remove.has(m.id))
+  );
+}
+
 export async function sqliteDeleteConversation(conversationId: string): Promise<void> {
   webMessages.delete(conversationId);
 }

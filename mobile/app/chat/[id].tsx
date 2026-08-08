@@ -44,6 +44,7 @@ import {
   ChatMessage,
   dedupeMessages,
   mergeMessagesForLoad,
+  mergeRemotePageAuthority,
   normalizeMessage,
   upsertMessage,
 } from '../../src/utils/messages';
@@ -128,6 +129,7 @@ export default function ChatScreen() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteForEveryone, setDeleteForEveryone] = useState(false);
   const [showDeleteMenu, setShowDeleteMenu] = useState(false);
+  const [unpinningId, setUnpinningId] = useState<string | null>(null);
 
   const flatListRef = useRef<RNFlatList<ListItem>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -220,7 +222,8 @@ export default function ChatScreen() {
       nextCursorRef.current = msgRes.nextCursor ?? null;
       hasMoreRef.current = msgRes.hasMore ?? remote.length >= MESSAGE_PAGE_SIZE;
 
-      applyMessages(mergeMessagesForLoad(local, remote, pending));
+      await cacheManager.pruneMissingFromRemotePage(conversationId, remote).catch(() => {});
+      applyMessages(mergeRemotePageAuthority(local, remote, pending));
     } catch (err) {
       if (!messagesRef.current.length) {
         const message =
@@ -351,9 +354,10 @@ export default function ChatScreen() {
   }, [clearSelection]);
 
   const scrollToMessage = useCallback(async (messageId: string) => {
-    if (!conversationId) return;
+    if (!conversationId || !messageId) return;
     isJumpingRef.current = true;
     stickToBottomRef.current = false;
+    setShowPinnedHistory(false);
 
     let msgs = messagesRef.current;
     let msgIndex = msgs.findIndex((m) => m.id === messageId);
@@ -368,14 +372,39 @@ export default function ChatScreen() {
         applyMessages(merged);
         msgs = messagesRef.current;
         msgIndex = msgs.findIndex((m) => m.id === messageId);
-      } catch {
+      } catch (err) {
         isJumpingRef.current = false;
+        const missing =
+          err instanceof ApiError &&
+          (err.code === 'NOT_FOUND' ||
+            /not found/i.test(err.message) ||
+            err.message === 'Message not found');
+        if (missing) {
+          // Stale pin — drop from local list and ask backend to unpin
+          setPinnedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(messageId);
+            return next;
+          });
+          setPinnedMessages((prev) => prev.filter((m) => m.id !== messageId));
+          setPinnedEntries((prev) => prev.filter((p) => p.messageId !== messageId));
+          try {
+            socketService.unpinMessage(messageId, conversationId);
+            await api.unpinMessage(conversationId, messageId);
+          } catch {
+            // ignore — message already gone
+          }
+          Alert.alert(t.chat.pinned, t.chat.messageUnavailable);
+        } else {
+          Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
+        }
         return;
       }
     }
 
     if (msgIndex < 0) {
       isJumpingRef.current = false;
+      Alert.alert(t.chat.pinned, t.chat.messageUnavailable);
       return;
     }
 
@@ -387,19 +416,60 @@ export default function ChatScreen() {
       if (dividerAt >= 0 && msgIndex >= dividerAt) flatIndex += 1;
     }
 
-    requestAnimationFrame(() => {
+    // Place target roughly in the upper-middle viewport (below header/pin bar).
+    const runScroll = () => {
       flatListRef.current?.scrollToIndex({
         index: flatIndex,
         animated: true,
-        viewPosition: 0.45,
+        viewPosition: 0.32,
+        viewOffset: 12,
       });
       setHighlightedId(messageId);
-      setTimeout(() => setHighlightedId(null), 2500);
+      if (Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      }
+      setTimeout(() => setHighlightedId(null), 1800);
       setTimeout(() => {
         isJumpingRef.current = false;
-      }, 800);
+      }, 900);
+    };
+
+    // Wait one frame so list data (if just loaded) is committed.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(runScroll);
     });
-  }, [conversationId, showUnreadDivider, lastReadAt, user?.id, applyMessages]);
+  }, [conversationId, showUnreadDivider, lastReadAt, user?.id, applyMessages, t]);
+
+  const handleUnpinFromList = useCallback(async (messageId: string) => {
+    if (!conversationId || !messageId) return;
+
+    const prevIds = new Set(pinnedIds);
+    const prevMessages = pinnedMessages;
+    const prevEntries = pinnedEntries;
+
+    // Optimistic UI — remove immediately
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(messageId);
+      return next;
+    });
+    setPinnedMessages((prev) => prev.filter((m) => m.id !== messageId));
+    setPinnedEntries((prev) => prev.filter((p) => p.messageId !== messageId));
+    setUnpinningId(messageId);
+
+    try {
+      socketService.unpinMessage(messageId, conversationId);
+      await api.unpinMessage(conversationId, messageId);
+      if (prevEntries.length <= 1) setShowPinnedHistory(false);
+    } catch {
+      setPinnedIds(prevIds);
+      setPinnedMessages(prevMessages);
+      setPinnedEntries(prevEntries);
+      Alert.alert(t.common.error, t.chat.unpinFailed);
+    } finally {
+      setUnpinningId(null);
+    }
+  }, [conversationId, pinnedIds, pinnedMessages, pinnedEntries, t]);
 
   useFocusEffect(
     useCallback(() => {
@@ -556,17 +626,31 @@ export default function ChatScreen() {
         );
       }),
       socketService.on('message:delete', (data: unknown) => {
-        const { messageId, forEveryone, userId: deleterId } = data as {
+        const { messageId, forEveryone, userId: deleterId, conversationId: clearedConv } = data as {
           messageId: string;
           forEveryone: boolean;
           userId: string;
+          conversationId?: string;
         };
-        updateMessages((prev) => {
-          if (forEveryone || deleterId === user?.id) {
-            return prev.filter((m) => m.id !== messageId);
-          }
-          return prev;
-        });
+        if (clearedConv && clearedConv !== conversationId) return;
+
+        const shouldHide = forEveryone || deleterId === user?.id;
+        if (!shouldHide) return;
+
+        updateMessages((prev) => prev.filter((m) => m.id !== messageId));
+        if (conversationId) {
+          cacheManager.deleteMessages(conversationId, [messageId]).catch(() => {});
+        }
+        if (forEveryone) {
+          setPinnedIds((prev) => {
+            if (!prev.has(messageId)) return prev;
+            const next = new Set(prev);
+            next.delete(messageId);
+            return next;
+          });
+          setPinnedMessages((prev) => prev.filter((m) => m.id !== messageId));
+          setPinnedEntries((prev) => prev.filter((p) => p.messageId !== messageId));
+        }
       }),
       socketService.on('message:edit', (data: unknown) => {
         const updated = normalizeMessage(data as Record<string, unknown>);
@@ -707,27 +791,73 @@ export default function ChatScreen() {
     if (!conversationId) return;
     const ids = new Set(selectedIds);
     if (actionTarget?.id) ids.add(actionTarget.id);
-    const idList = Array.from(ids);
+    const idList = Array.from(ids).filter(Boolean);
     if (idList.length === 0) return;
 
-    // Optimistic remove from UI first so delete feels instant
+    const snapshot = messagesRef.current.filter((m) => idList.includes(m.id));
+    const pinSnapshot = {
+      ids: new Set(pinnedIds),
+      messages: pinnedMessages,
+      entries: pinnedEntries,
+    };
+
+    // Optimistic UI + local cache removal (instant, no refresh)
     updateMessages((prev) => prev.filter((m) => !idList.includes(m.id)));
+    cacheManager.deleteMessages(conversationId, idList).catch(() => {});
+    if (forEveryone) {
+      setPinnedIds((prev) => {
+        const next = new Set(prev);
+        idList.forEach((id) => next.delete(id));
+        return next;
+      });
+      setPinnedMessages((prev) => prev.filter((m) => !idList.includes(m.id)));
+      setPinnedEntries((prev) => prev.filter((p) => !idList.includes(p.messageId)));
+    }
     clearSelection();
     setShowDeleteConfirm(false);
     setShowDeleteMenu(false);
 
+    const failures: string[] = [];
     await Promise.all(
       idList.map(async (id) => {
         if (id.startsWith('temp-')) return;
         try {
-          socketService.deleteMessage(id, conversationId, forEveryone);
+          // REST persists + fans out Socket.IO (emitMessageDeleted)
           await api.deleteMessage(id, forEveryone);
         } catch {
-          // Keep local removal even if remote call fails
+          failures.push(id);
         }
       })
     );
-  }, [conversationId, selectedIds, actionTarget, updateMessages, clearSelection]);
+
+    if (failures.length > 0) {
+      const restore = snapshot.filter((m) => failures.includes(m.id));
+      if (restore.length > 0) {
+        updateMessages((prev) =>
+          dedupeMessages([...prev, ...restore]).sort((a, b) =>
+            a.createdAt.localeCompare(b.createdAt)
+          )
+        );
+        cacheManager.saveMessages(conversationId, restore).catch(() => {});
+      }
+      if (forEveryone) {
+        setPinnedIds(pinSnapshot.ids);
+        setPinnedMessages(pinSnapshot.messages);
+        setPinnedEntries(pinSnapshot.entries);
+      }
+      Alert.alert(t.common.error, t.chat.deleteMessageFailed);
+    }
+  }, [
+    conversationId,
+    selectedIds,
+    actionTarget,
+    pinnedIds,
+    pinnedMessages,
+    pinnedEntries,
+    updateMessages,
+    clearSelection,
+    t,
+  ]);
 
   const handleAction = (action: MessageAction) => {
     const message = getPrimarySelected();
@@ -978,6 +1108,9 @@ export default function ChatScreen() {
     selectionRing: colors.selectionRing,
     selectionOverlaySent: colors.selectionOverlaySent,
     selectionOverlayReceived: colors.selectionOverlayReceived,
+    jumpHighlightFrom: colors.jumpHighlightFrom,
+    jumpHighlightTo: colors.jumpHighlightTo,
+    jumpHighlightRing: colors.jumpHighlightRing,
   };
 
   const formatTime = (dateStr: string) =>
@@ -1286,8 +1419,12 @@ export default function ChatScreen() {
         title={t.chat.pinned}
         pins={pinnedEntries}
         deletedLabel={t.chat.deletedMessage}
+        emptyLabel={t.chat.noPinned}
+        unpinLabel={t.chat.unpin}
         onClose={() => setShowPinnedHistory(false)}
         onJumpToMessage={scrollToMessage}
+        onUnpin={handleUnpinFromList}
+        unpinningId={unpinningId}
         colors={{ ...colors, pressHighlight: colors.pressHighlight }}
         fonts={fonts}
       />

@@ -31,6 +31,10 @@ export const Colors = {
     selectionWrap: 'rgba(37, 99, 235, 0.14)',
     selectionOverlaySent: 'rgba(255, 255, 255, 0.24)',
     selectionOverlayReceived: 'rgba(37, 99, 235, 0.16)',
+    // Jump-from-pin highlight (amber — distinct from blue selection)
+    jumpHighlightFrom: 'rgba(245, 158, 11, 0)',
+    jumpHighlightTo: 'rgba(245, 158, 11, 0.34)',
+    jumpHighlightRing: '#D97706',
   },
   dark: {
     background: '#0F172A',
@@ -64,6 +68,10 @@ export const Colors = {
     selectionWrap: 'rgba(96, 165, 250, 0.18)',
     selectionOverlaySent: 'rgba(255, 255, 255, 0.16)',
     selectionOverlayReceived: 'rgba(147, 197, 253, 0.22)',
+    // Jump-from-pin highlight (bright amber for dark bubbles / low brightness)
+    jumpHighlightFrom: 'rgba(251, 191, 36, 0)',
+    jumpHighlightTo: 'rgba(251, 191, 36, 0.38)',
+    jumpHighlightRing: '#FBBF24',
   },
 };
 

@@ -297,20 +297,43 @@ export class MessageService {
   async deleteMessage(messageId: string, userId: string, forEveryone: boolean) {
     const message = await prisma.message.findUnique({ where: { id: messageId } });
     if (!message) throw new AppError(404, 'Message not found');
-    if (message.deletedForAll || message.deletedFor.includes(userId)) {
+
+    const participant = await prisma.participant.findUnique({
+      where: {
+        conversationId_userId: {
+          conversationId: message.conversationId,
+          userId,
+        },
+      },
+    });
+    if (!participant) throw new AppError(403, 'Not a participant');
+
+    if (message.deletedForAll) {
       return { message: 'Message already deleted', conversationId: message.conversationId };
     }
 
     if (forEveryone) {
-      if (message.senderId !== userId) throw new AppError(403, 'Can only delete own messages for everyone');
+      if (message.senderId !== userId) {
+        throw new AppError(403, 'Can only delete own messages for everyone');
+      }
       const ageMs = Date.now() - message.createdAt.getTime();
-      if (ageMs > 3600000) throw new AppError(400, 'Can only delete for everyone within 1 hour');
+      if (ageMs > 3600000) {
+        throw new AppError(400, 'Can only delete for everyone within 1 hour');
+      }
 
       await prisma.message.update({
         where: { id: messageId },
         data: { isDeleted: true, deletedForAll: true },
       });
+
+      // Pins pointing at a globally deleted message are stale for everyone
+      await prisma.messagePin.deleteMany({
+        where: { messageId, conversationId: message.conversationId },
+      });
     } else {
+      if (message.deletedFor.includes(userId)) {
+        return { message: 'Message already deleted', conversationId: message.conversationId };
+      }
       await prisma.message.update({
         where: { id: messageId },
         data: { deletedFor: { push: userId } },
@@ -325,6 +348,10 @@ export class MessageService {
     await cacheDel(CacheKeys.messages(message.conversationId));
     await cacheInvalidatePattern(`${CacheKeys.messages(message.conversationId)}:*`);
     await cacheDel(CacheKeys.userConversations(userId));
+    await cacheDel(CacheKeys.pinnedMessages(message.conversationId));
+    await cacheInvalidatePattern(`${CacheKeys.pinnedMessages(message.conversationId)}:*`);
+    await cacheDel(CacheKeys.starredMessages(userId));
+
     return { message: 'Message deleted', conversationId: message.conversationId };
   }
 

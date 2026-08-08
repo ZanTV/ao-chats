@@ -85,6 +85,39 @@ export function mergeMessagesForLoad(...lists: ChatMessage[][]): ChatMessage[] {
 }
 
 /**
+ * Prefer the remote page as source of truth for its time window so locally
+ * cached deleted messages cannot resurrect after delete-for-me / for-everyone.
+ */
+export function mergeRemotePageAuthority(
+  local: ChatMessage[],
+  remotePage: ChatMessage[],
+  pending: ChatMessage[] = []
+): ChatMessage[] {
+  if (remotePage.length === 0) {
+    return mergeMessagesForLoad(local, pending);
+  }
+
+  const remoteIds = new Set(remotePage.map((m) => m.id));
+  const oldestRemote = remotePage.reduce(
+    (min, m) => (m.createdAt < min ? m.createdAt : min),
+    remotePage[0].createdAt
+  );
+  const newestRemote = remotePage.reduce(
+    (max, m) => (m.createdAt > max ? m.createdAt : max),
+    remotePage[0].createdAt
+  );
+
+  const keptLocal = local.filter((m) => {
+    if (m.pending || m.id.startsWith('temp-') || m.failed) return true;
+    if (remoteIds.has(m.id)) return false; // remote copy wins via merge below
+    // Outside the fetched window — keep older pages from local cache
+    return m.createdAt < oldestRemote || m.createdAt > newestRemote;
+  });
+
+  return mergeMessagesForLoad(keptLocal, remotePage, pending);
+}
+
+/**
  * Insert or update a message without duplication.
  * Handles optimistic temp IDs and race between REST + Socket.IO.
  */

@@ -17,6 +17,8 @@ export function safeRgba(r: number, g: number, b: number, alpha: number): string
   return `rgba(${r}, ${g}, ${b}, ${clampOpacity(alpha)})`;
 }
 
-/** Message jump-highlight: blue overlay 0 → 22% opacity */
-export const MESSAGE_HIGHLIGHT_FROM = 'rgba(37, 99, 235, 0)';
-export const MESSAGE_HIGHLIGHT_TO = 'rgba(37, 99, 235, 0.22)';
+/** Message jump-highlight fallbacks (theme may override via colors.jumpHighlight*) */
+export const MESSAGE_HIGHLIGHT_FROM = 'rgba(245, 158, 11, 0)';
+export const MESSAGE_HIGHLIGHT_TO = 'rgba(245, 158, 11, 0.34)';
+export const MESSAGE_HIGHLIGHT_FROM_DARK = 'rgba(251, 191, 36, 0)';
+export const MESSAGE_HIGHLIGHT_TO_DARK = 'rgba(251, 191, 36, 0.38)';

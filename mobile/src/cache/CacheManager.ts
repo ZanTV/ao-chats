@@ -3,6 +3,7 @@ import { mmkvGet, mmkvSet, mmkvDelete, mmkvClearPrefix, mmkvClearAll } from './m
 import {
   sqliteGetLatestMessages,
   sqliteUpsertMessages,
+  sqliteDeleteMessages,
   sqliteDeleteConversation,
   sqliteClearAll,
 } from './messageDb';
@@ -83,6 +84,46 @@ export class CacheManager {
   async saveMessages(conversationId: string, messages: ChatMessage[]): Promise<void> {
     if (messages.length === 0) return;
     await sqliteUpsertMessages(conversationId, dedupeMessages(messages));
+  }
+
+  async deleteMessages(conversationId: string, messageIds: string[]): Promise<void> {
+    if (messageIds.length === 0) return;
+    await sqliteDeleteMessages(conversationId, messageIds);
+  }
+
+  /**
+   * After a successful remote page fetch, drop local rows that belong in that
+   * window but were omitted by the server (e.g. delete-for-me / for-everyone).
+   */
+  async pruneMissingFromRemotePage(
+    conversationId: string,
+    remotePage: ChatMessage[]
+  ): Promise<string[]> {
+    if (remotePage.length === 0) return [];
+    const local = await this.getLocalMessages(conversationId);
+    const remoteIds = new Set(remotePage.map((m) => m.id));
+    const oldestRemote = remotePage.reduce(
+      (min, m) => (m.createdAt < min ? m.createdAt : min),
+      remotePage[0].createdAt
+    );
+    const newestRemote = remotePage.reduce(
+      (max, m) => (m.createdAt > max ? m.createdAt : max),
+      remotePage[0].createdAt
+    );
+
+    const staleIds = local
+      .filter((m) => {
+        if (m.pending || m.id.startsWith('temp-') || m.failed) return false;
+        if (remoteIds.has(m.id)) return false;
+        // Only prune messages that fall inside the fetched window
+        return m.createdAt >= oldestRemote && m.createdAt <= newestRemote;
+      })
+      .map((m) => m.id);
+
+    if (staleIds.length > 0) {
+      await sqliteDeleteMessages(conversationId, staleIds);
+    }
+    return staleIds;
   }
 
   async mergeMessages(conversationId: string, messages: ChatMessage[]): Promise<ChatMessage[]> {

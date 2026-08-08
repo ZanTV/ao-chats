@@ -93,6 +93,23 @@ export async function sqliteUpsertMessages(
   });
 }
 
+export async function sqliteDeleteMessages(
+  conversationId: string,
+  messageIds: string[]
+): Promise<void> {
+  if (messageIds.length === 0) return;
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    for (const id of messageIds) {
+      await db.runAsync(
+        `DELETE FROM messages WHERE conversation_id = ? AND id = ?`,
+        conversationId,
+        id
+      );
+    }
+  });
+}
+
 export async function sqliteDeleteConversation(conversationId: string): Promise<void> {
   const db = await getDb();
   await db.runAsync(`DELETE FROM messages WHERE conversation_id = ?`, conversationId);

@@ -35,6 +35,9 @@ interface ThemeColors {
   selectionRing?: string;
   selectionOverlaySent?: string;
   selectionOverlayReceived?: string;
+  jumpHighlightFrom?: string;
+  jumpHighlightTo?: string;
+  jumpHighlightRing?: string;
 }
 
 interface Props {
