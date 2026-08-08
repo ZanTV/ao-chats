@@ -66,10 +66,11 @@ class ApiClient {
       });
     } catch (err) {
       if (err instanceof ApiError) throw err;
-      throw new ApiError(
-        'Cannot reach the AO Chats server. Check your internet connection.',
-        'NETWORK_ERROR'
-      );
+      const msg =
+        typeof window !== 'undefined'
+          ? 'Cannot reach the AO Chats server. The API may be starting up — wait a moment and try again.'
+          : 'Cannot reach the AO Chats server. Check your internet connection.';
+      throw new ApiError(msg, 'NETWORK_ERROR');
     }
 
     if (response.status === 401) {
