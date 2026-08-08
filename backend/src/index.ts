@@ -26,6 +26,11 @@ const app = express();
 const httpServer = createServer(app);
 const corsOrigins = parseCorsOrigins();
 
+// Instant liveness probe — no DB/Redis. Render must use this path to avoid 502 during cold start.
+app.get('/health/live', (_req, res) => {
+  res.status(200).json({ status: 'live', timestamp: new Date().toISOString() });
+});
+
 if (config.isProduction) {
   app.set('trust proxy', 1);
 }

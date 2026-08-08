@@ -12,8 +12,8 @@
 | **Root Directory** | `backend` |
 | **Runtime** | Node |
 | **Build Command** | `npm install && npm run build` |
-| **Start Command** | `node scripts/start-prod.mjs` |
-| **Health Check Path** | `/health` |
+| **Start Command** | `node dist/index.js` (NOT `start-prod.mjs`) |
+| **Health Check Path** | `/health/live` |
 
 Or use the repo **`render.yaml`** blueprint (Render → New → Blueprint).
 
