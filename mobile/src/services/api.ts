@@ -1,6 +1,6 @@
 import { getAccessToken, getRefreshToken, saveTokens, clearTokens } from './storage';
 import { getApiUrl, API_TIMEOUT_MS, isProduction } from './config';
-import { formatApiError, ApiError } from '../utils/validation';
+import { formatApiError, classifyHttpError, ApiError } from '../utils/validation';
 import { isJwtExpired } from '../utils/jwt';
 import { socketService } from './socket';
 
@@ -12,9 +12,15 @@ function sleep(ms: number) {
 }
 
 function networkErrorMessage(): string {
-  return isProduction()
-    ? 'AO Chats server is waking up or temporarily unavailable. Please wait a moment and try again.'
-    : 'Cannot reach the AO Chats server. Check your internet connection.';
+  return 'Cannot reach the AO Chats server. Check your internet connection.';
+}
+
+function timeoutErrorMessage(): string {
+  return 'The server took too long to respond. Please try again.';
+}
+
+function serverUnavailableMessage(): string {
+  return 'AO Chats is temporarily unavailable. Please try again.';
 }
 
 class ApiClient {
@@ -33,10 +39,7 @@ class ApiClient {
       return await fetch(url, { ...options, signal: controller.signal });
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new ApiError(
-        'Server is taking too long to respond. The API may be starting up — please try again.',
-        'TIMEOUT'
-      );
+        throw new ApiError(timeoutErrorMessage(), 'TIMEOUT');
       }
       throw new ApiError(networkErrorMessage(), 'NETWORK_ERROR');
     } finally {
@@ -115,27 +118,33 @@ class ApiClient {
           });
           if (!retry.ok) {
             const err = await this.parseJsonSafe(retry).catch(() => ({ error: 'Request failed' }));
-            throw new ApiError(formatApiError(err as { error?: string }), (err as { code?: string }).code);
+            throw new ApiError(
+              classifyHttpError(retry.status, err as { error?: string; code?: string }, endpoint),
+              (err as { code?: string }).code
+            );
           }
           return (await this.parseJsonSafe(retry)) as T;
         }
       }
 
       const err = await this.parseJsonSafe(response).catch(() => ({ error: 'Unauthorized' }));
-      throw new ApiError(formatApiError(err as { error?: string }), (err as { code?: string }).code);
+      throw new ApiError(
+        classifyHttpError(response.status, err as { error?: string; code?: string }, endpoint),
+        (err as { code?: string }).code
+      );
     }
 
     if (!response.ok) {
       if (response.status === 502 || response.status === 503) {
-        throw new ApiError(
-          'AO Chats server is starting up. Please wait a moment and try again.',
-          'SERVER_UNAVAILABLE'
-        );
+        throw new ApiError(serverUnavailableMessage(), 'SERVER_UNAVAILABLE');
       }
       const err = await this.parseJsonSafe(response).catch(() => ({
         error: `Request failed (${response.status})`,
       }));
-      throw new ApiError(formatApiError(err as { error?: string }), (err as { code?: string }).code);
+      throw new ApiError(
+        classifyHttpError(response.status, err as { error?: string; code?: string }, endpoint),
+        (err as { code?: string }).code
+      );
     }
 
     return (await this.parseJsonSafe(response)) as T;

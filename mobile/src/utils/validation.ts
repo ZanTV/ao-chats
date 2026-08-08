@@ -8,6 +8,55 @@ export class ApiError extends Error {
   }
 }
 
+export function classifyHttpError(
+  status: number,
+  err: { error?: string; message?: string; code?: string; details?: Record<string, string[] | undefined> },
+  endpoint?: string
+): string {
+  const code = err.code;
+  const backendMessage = err.error || err.message;
+
+  if (code === 'EMAIL_NOT_VERIFIED') {
+    return backendMessage || 'Please verify your email first. Check your inbox or request a new code.';
+  }
+  if (code === 'EMAIL_NOT_FOUND') {
+    return backendMessage || 'No account available for this email. Please create one.';
+  }
+  if (code === 'INVALID_PASSWORD') {
+    return backendMessage || 'Incorrect password. Please try again.';
+  }
+  if (code === 'VALIDATION_ERROR') {
+    return formatApiError(err);
+  }
+  if (code === 'DB_ERROR' || code === 'INTERNAL_ERROR') {
+    return 'AO Chats is temporarily unavailable. Please try again.';
+  }
+  if (code === 'DB_UNAVAILABLE') {
+    return 'AO Chats is temporarily unavailable. Please try again.';
+  }
+
+  if (status === 401) {
+    const isPublicAuth =
+      endpoint &&
+      /^\/auth\/(login|register|forgot-password|reset-password|verify|resend)/.test(endpoint);
+    if (isPublicAuth) {
+      return backendMessage || 'Invalid email or password.';
+    }
+    return backendMessage || 'Session expired. Please sign in again.';
+  }
+  if (status === 403) {
+    return backendMessage || 'You are not authorized to perform this action.';
+  }
+  if (status === 404) {
+    return backendMessage || 'The requested AO Chats service could not be found.';
+  }
+  if (status === 500 || status === 502 || status === 503) {
+    return 'AO Chats is temporarily unavailable. Please try again.';
+  }
+
+  return formatApiError(err);
+}
+
 export function formatApiError(err: {
   error?: string;
   message?: string;
@@ -50,13 +99,13 @@ export function formatApiError(err: {
     return 'Please verify your email first. Check your inbox or request a new code.';
   }
   if (err.code === 'NETWORK_ERROR') {
-    return 'AO Chats server is waking up or temporarily unavailable. Please wait a moment and try again.';
+    return 'Cannot reach the AO Chats server. Check your internet connection.';
   }
   if (err.code === 'SERVER_UNAVAILABLE') {
-    return 'AO Chats server is starting up. Please wait a moment and try again.';
+    return 'AO Chats is temporarily unavailable. Please try again.';
   }
   if (err.code === 'TIMEOUT') {
-    return 'Server is taking too long to respond. The API may be starting up — please try again.';
+    return 'The server took too long to respond. Please try again.';
   }
   if (err.code === 'RESET_COOLDOWN') {
     return 'Please wait before requesting another code.';

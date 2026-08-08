@@ -11,6 +11,7 @@ import { connectRedis, isRedisAvailable } from './config/redis';
 import { prisma } from './config/database';
 import { verifyEmailTransport } from './utils/email.utils';
 import { ensureAoManagerAccount } from './services/ao-manager.service';
+import { ensureProductionSchema, isAuthSchemaReady } from './database/schemaEnsure';
 import { errorHandler } from './middleware/errorHandler';
 import { authLimiter, apiLimiter } from './middleware/rateLimit';
 import { setupSocketIO, setIO } from './sockets';
@@ -77,18 +78,21 @@ app.get('/health', async (_req, res) => {
   }
 
   const redisOk = isRedisAvailable();
+  const schemaReady = dbOk ? await isAuthSchemaReady() : false;
   const payload = {
-    success: dbOk,
-    status: dbOk ? 'ok' : 'degraded',
+    success: dbOk && schemaReady,
+    status: dbOk && schemaReady ? 'ok' : 'degraded',
     message: 'AO Chats API',
     version: '2.0.0',
     environment: config.nodeEnv,
     timestamp: new Date().toISOString(),
     database: dbOk ? 'connected' : 'disconnected',
+    schema: schemaReady ? 'ready' : 'pending',
     redis: redisOk ? 'connected' : 'unavailable',
     socketIo: 'connected',
     services: {
       database: dbOk ? 'connected' : 'disconnected',
+      schema: schemaReady ? 'ready' : 'pending',
       redis: redisOk ? 'connected' : 'unavailable',
     },
     ...(dbError && !dbOk ? { databaseError: dbError } : {}),
@@ -146,7 +150,19 @@ function scheduleBackgroundMigrations() {
   }, 3000);
 }
 
-function start() {
+async function start() {
+  if (config.isProduction && config.databaseUrl) {
+    try {
+      await ensureProductionSchema();
+      console.log('✓ Production schema patches applied');
+    } catch (err) {
+      console.error(
+        'Startup schema patch failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
   httpServer.listen(config.port, '0.0.0.0', () => {
     console.log(`AO Chats API v2.0 running on port ${config.port}`);
     console.log(`Environment: ${config.nodeEnv}`);
@@ -180,6 +196,9 @@ process.on('unhandledRejection', (reason) => {
   console.error('[AO Chats] Unhandled rejection:', reason);
 });
 
-start();
+void start().catch((err) => {
+  console.error('[AO Chats] Failed to start:', err instanceof Error ? err.message : err);
+  process.exit(1);
+});
 
 export { app, httpServer, io };

@@ -43,6 +43,17 @@ Then redeploy the backend service.
 
 ```bash
 curl https://api.aochats.chat/health
+curl -X POST https://api.aochats.chat/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"test@test.com\",\"password\":\"WrongPass123!\"}"
 ```
+
+Expected login test: `404` with `EMAIL_NOT_FOUND` (not `500 DB_ERROR`).
+
+If login returns `DB_ERROR`, production Neon is missing schema columns — run from `backend/`:
+
+```bash
+node scripts/apply-schema-patch.mjs
+```
+
+Or redeploy backend (applies patches automatically on startup).
 
 Web: open https://www.aochats.chat (prefer `www`).
