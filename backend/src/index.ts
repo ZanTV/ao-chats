@@ -1,8 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import { spawn } from 'child_process';
+import path from 'path';
 import { createServer } from 'http';
 import { config } from './config';
+import { isHostedPlatform } from './config/platform';
 import { parseCorsOrigins } from './config/cors';
 import { connectRedis, isRedisAvailable } from './config/redis';
 import { prisma } from './config/database';
@@ -120,6 +123,24 @@ async function bootstrap() {
   }
 }
 
+function scheduleBackgroundMigrations() {
+  if (process.env.SKIP_MIGRATE_ON_START === 'true') return;
+  if (!config.isProduction || !isHostedPlatform()) return;
+
+  setTimeout(() => {
+    console.log('→ Running database migrations in background…');
+    const script = path.join(process.cwd(), 'scripts', 'migrate-deploy.mjs');
+    const child = spawn(process.execPath, [script], {
+      stdio: 'inherit',
+      env: process.env,
+    });
+    child.on('exit', (code) => {
+      if (code === 0) console.log('✓ Background migrations finished');
+      else console.error(`✗ Background migrations failed (exit ${code})`);
+    });
+  }, 3000);
+}
+
 function start() {
   httpServer.listen(config.port, '0.0.0.0', () => {
     console.log(`AO Chats API v2.0 running on port ${config.port}`);
@@ -127,6 +148,7 @@ function start() {
     if (config.isProduction) {
       console.log(`Client URL: ${config.clientUrl}`);
     }
+    scheduleBackgroundMigrations();
   });
 
   void bootstrap().catch((err) => {

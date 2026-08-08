@@ -9,7 +9,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+function isHostedPlatform() {
+  return Boolean(
+    process.env.RENDER === 'true' ||
+      process.env.RENDER_SERVICE_ID ||
+      process.env.RAILWAY_ENVIRONMENT ||
+      process.env.RAILWAY_PROJECT_ID ||
+      process.env.RAILWAY_SERVICE_ID
+  );
+}
+
 for (const name of ['.env', '.env.development', '.env.production']) {
+  if (isHostedPlatform()) break;
   const file = path.join(root, name);
   if (fs.existsSync(file)) {
     dotenv.config({ path: file });

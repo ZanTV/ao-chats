@@ -7,8 +7,8 @@ services:
     runtime: node
     rootDir: backend
     branch: main
-    buildCommand: npm install && npm run build
-    startCommand: node scripts/start-prod.mjs
+    buildCommand: npm install && npm run build && node scripts/production-preflight.mjs
+    startCommand: node dist/index.js
     healthCheckPath: /health
     autoDeploy: true
     envVars:
