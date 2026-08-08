@@ -180,8 +180,8 @@ export default function HomeScreen() {
           updated.unreadCount = Math.max(0, payload.unreadCount);
         }
 
-        const next = [...prev];
-        next.splice(idx, 1);
+        // Upsert by conversationId (never push a second card for the same id)
+        const next = prev.filter((c) => c.id !== payload.conversationId);
         const sorted = sortConversations([updated, ...next]);
         cacheManager.set(CacheDomain.CONVERSATIONS, sorted);
         return sorted;

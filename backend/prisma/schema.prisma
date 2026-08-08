@@ -148,10 +148,12 @@ model Block {
 }
 
 model Conversation {
-  id        String   @id @default(uuid())
-  isGroup   Boolean  @default(false) @map("is_group")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(uuid())
+  isGroup       Boolean  @default(false) @map("is_group")
+  /// Canonical key for 1-to-1 DMs: min(userId):max(userId). Null for groups.
+  directPairKey String?  @unique @map("direct_pair_key")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   participants Participant[]
   messages     Message[]

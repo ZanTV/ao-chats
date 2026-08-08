@@ -23,7 +23,9 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "node scripts/migrate-deploy.mjs",
     "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:merge-duplicate-dms": "node scripts/merge-duplicate-direct-conversations.mjs",
+    "db:merge-duplicate-dms:apply": "node scripts/merge-duplicate-direct-conversations.mjs --apply"
   },
   "dependencies": {
     "@prisma/client": "^6.3.0",

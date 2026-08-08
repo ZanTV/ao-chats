@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import {
   cacheDel,
@@ -12,7 +13,11 @@ import { friendService } from '../friends/friend.service';
 import { messageService } from '../messages/message.service';
 import { notificationService } from '../notifications/notification.service';
 import { getAoManagerId } from '../../services/ao-manager.service';
-import { formatMessagePreview, sortConversations } from '../../utils/conversation.utils';
+import {
+  directConversationPairKey,
+  formatMessagePreview,
+  sortConversations,
+} from '../../utils/conversation.utils';
 import { fetchUnreadCountsByConversation } from './unreadCounts';
 
 const listParticipantUserSelect = {
@@ -32,8 +37,58 @@ const participantUserSelect = {
   bio: true,
 };
 
+const conversationWithParticipants = {
+  participants: {
+    include: { user: { select: participantUserSelect } },
+  },
+} as const;
+
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+}
+
 export class ConversationService {
+  private async loadDirectConversationByPairKey(pairKey: string) {
+    return prisma.conversation.findUnique({
+      where: { directPairKey: pairKey },
+      include: conversationWithParticipants,
+    });
+  }
+
+  /** Exact 2-party DM for this pair (ignores groups / larger rooms). */
+  private async findLegacyExactDirectPair(userId: string, otherUserId: string) {
+    const candidates = await prisma.conversation.findMany({
+      where: {
+        isGroup: false,
+        AND: [
+          { participants: { some: { userId } } },
+          { participants: { some: { userId: otherUserId } } },
+        ],
+      },
+      include: {
+        participants: {
+          include: { user: { select: participantUserSelect } },
+        },
+        _count: { select: { messages: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const exact = candidates.filter((c) => c.participants.length === 2);
+    if (exact.length === 0) return null;
+
+    exact.sort((a, b) => {
+      if (b._count.messages !== a._count.messages) return b._count.messages - a._count.messages;
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
+    return exact[0];
+  }
+
   async getOrCreateDirectConversation(userId: string, otherUserId: string) {
+    if (userId === otherUserId) {
+      throw new AppError(400, 'Cannot start a conversation with yourself');
+    }
+
     const otherUser = await prisma.user.findUnique({
       where: { id: otherUserId },
       select: { id: true, isSystemAccount: true },
@@ -48,39 +103,56 @@ export class ConversationService {
       }
     }
 
-    const existing = await prisma.conversation.findFirst({
-      where: {
-        isGroup: false,
-        AND: [
-          { participants: { some: { userId } } },
-          { participants: { some: { userId: otherUserId } } },
-        ],
-      },
-      include: {
-        participants: {
-          include: { user: { select: participantUserSelect } },
-        },
-      },
-    });
+    const pairKey = directConversationPairKey(userId, otherUserId);
 
-    if (existing) return existing;
+    const byKey = await this.loadDirectConversationByPairKey(pairKey);
+    if (byKey) {
+      await cacheDel(CacheKeys.userConversations(userId), CacheKeys.userConversations(otherUserId));
+      return byKey;
+    }
 
-    const conversation = await prisma.conversation.create({
-      data: {
-        isGroup: false,
-        participants: {
-          create: [{ userId }, { userId: otherUserId }],
-        },
-      },
-      include: {
-        participants: {
-          include: { user: { select: participantUserSelect } },
-        },
-      },
-    });
+    const legacy = await this.findLegacyExactDirectPair(userId, otherUserId);
+    if (legacy) {
+      if (!legacy.directPairKey) {
+        try {
+          const updated = await prisma.conversation.update({
+            where: { id: legacy.id },
+            data: { directPairKey: pairKey },
+            include: conversationWithParticipants,
+          });
+          await cacheDel(CacheKeys.userConversations(userId), CacheKeys.userConversations(otherUserId));
+          return updated;
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            const winner = await this.loadDirectConversationByPairKey(pairKey);
+            if (winner) return winner;
+          }
+          throw err;
+        }
+      }
+      return legacy;
+    }
 
-    await cacheDel(CacheKeys.userConversations(userId), CacheKeys.userConversations(otherUserId));
-    return conversation;
+    try {
+      const conversation = await prisma.conversation.create({
+        data: {
+          isGroup: false,
+          directPairKey: pairKey,
+          participants: {
+            create: [{ userId }, { userId: otherUserId }],
+          },
+        },
+        include: conversationWithParticipants,
+      });
+      await cacheDel(CacheKeys.userConversations(userId), CacheKeys.userConversations(otherUserId));
+      return conversation;
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        const existing = await this.loadDirectConversationByPairKey(pairKey);
+        if (existing) return existing;
+      }
+      throw err;
+    }
   }
 
   async getOrCreateAoManagerConversation(userId: string) {
@@ -123,7 +195,31 @@ export class ConversationService {
 
     const unreadMap = await fetchUnreadCountsByConversation(userId);
 
-    const conversations = participations.map((p) => {
+    type ListItem = {
+      id: string;
+      isPinned: boolean;
+      otherUser: (typeof participations)[number]['conversation']['participants'][number]['user'] | null;
+      lastMessage: {
+        id: string;
+        content: string;
+        preview: string | null;
+        senderId: string;
+        senderName: string;
+        type: string;
+        createdAt: string;
+        isRead: boolean;
+        status: string;
+        deliveredAt: string | undefined;
+        readAt: string | undefined;
+        waitingAt: string | undefined;
+        isEdited: boolean;
+      } | null;
+      updatedAt: string;
+      unreadCount: number;
+      _isGroup: boolean;
+    };
+
+    const mapped: ListItem[] = participations.map((p) => {
       const otherParticipant = p.conversation.participants.find((pp) => pp.userId !== userId);
       const latestMessage = p.conversation.messages[0] || null;
       const lastMessage =
@@ -168,8 +264,39 @@ export class ConversationService {
           : null,
         updatedAt: p.conversation.updatedAt.toISOString(),
         unreadCount: unreadMap.get(p.conversation.id) || 0,
+        _isGroup: p.conversation.isGroup,
       };
     });
+
+    // Defense-in-depth: one list row per DM peer (groups untouched).
+    const groups: ListItem[] = [];
+    const dmByPeer = new Map<string, ListItem>();
+    for (const item of mapped) {
+      if (item._isGroup || !item.otherUser) {
+        groups.push(item);
+        continue;
+      }
+      const peerId = item.otherUser.id;
+      const existing = dmByPeer.get(peerId);
+      if (!existing) {
+        dmByPeer.set(peerId, item);
+        continue;
+      }
+      const preferItem =
+        new Date(item.updatedAt).getTime() >= new Date(existing.updatedAt).getTime();
+      if (preferItem) {
+        console.warn(
+          `[conversations] duplicate DM peer=${peerId} keeping=${item.id} dropping=${existing.id}`
+        );
+        dmByPeer.set(peerId, item);
+      } else {
+        console.warn(
+          `[conversations] duplicate DM peer=${peerId} keeping=${existing.id} dropping=${item.id}`
+        );
+      }
+    }
+
+    const conversations = [...groups, ...dmByPeer.values()].map(({ _isGroup, ...rest }) => rest);
 
     const sorted = sortConversations(conversations);
     const cacheVersion = await cacheSetVersioned(cacheKey, sorted, CacheTTL.conversations);

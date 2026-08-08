@@ -1,5 +1,10 @@
 import { MessageType } from '@prisma/client';
 
+/** Canonical 1-to-1 pair key — order-independent (A:B === B:A). */
+export function directConversationPairKey(userIdA: string, userIdB: string): string {
+  return userIdA < userIdB ? `${userIdA}:${userIdB}` : `${userIdB}:${userIdA}`;
+}
+
 export function formatMessagePreview(
   message: {
     content: string;
