@@ -108,10 +108,6 @@ export default function HomeScreen() {
     toastTimerRef.current = setTimeout(() => setToast(null), 2200);
   }, []);
 
-  const clearSelection = useCallback(() => {
-    setSelectedIds(new Set());
-  }, []);
-
   const exitSelectionMode = useCallback(() => {
     setSelectedIds(new Set());
     setConfirmAction(null);
