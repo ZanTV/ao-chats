@@ -7,6 +7,7 @@ import {
   TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Alert,
   ActivityIndicator,
@@ -22,6 +23,7 @@ import { SwipeableMessageRow } from '../../src/components/chat/SwipeableMessageR
 import { MessageActionBar, MessageAction } from '../../src/components/chat/MessageActionBar';
 import { ReplyPreviewBar } from '../../src/components/chat/ReplyPreviewBar';
 import { ReactionPicker } from '../../src/components/chat/ReactionPicker';
+import { AOEmojiPicker } from '../../src/components/emoji/AOEmojiPicker';
 import { ForwardSheet } from '../../src/components/chat/ForwardSheet';
 import { MessageInfoSheet } from '../../src/components/chat/MessageInfoSheet';
 import { PinnedBar } from '../../src/components/chat/PinnedBar';
@@ -120,6 +122,7 @@ export default function ChatScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [showComposerEmoji, setShowComposerEmoji] = useState(false);
   const [showForward, setShowForward] = useState(false);
   const [infoMessage, setInfoMessage] = useState<Message | null>(null);
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
@@ -900,6 +903,7 @@ export default function ChatScreen() {
         clearSelection();
         break;
       case 'react':
+        setShowComposerEmoji(false);
         setShowReactionPicker(true);
         break;
       case 'forward':
@@ -1415,6 +1419,32 @@ export default function ChatScreen() {
         )}
 
         <View style={[styles.inputBar, { backgroundColor: colors.surface }]}>
+          <TouchableOpacity
+            style={[
+              styles.emojiToggle,
+              {
+                backgroundColor: showComposerEmoji ? colors.primary + '18' : colors.inputBackground,
+                borderColor: colors.inputBorder,
+              },
+            ]}
+            onPress={() => {
+              if (showComposerEmoji) {
+                setShowComposerEmoji(false);
+                requestAnimationFrame(() => inputRef.current?.focus());
+                return;
+              }
+              Keyboard.dismiss();
+              setShowComposerEmoji(true);
+            }}
+            accessibilityLabel={t.chat.searchEmoji}
+            hitSlop={6}
+          >
+            <Ionicons
+              name={showComposerEmoji ? 'keypad-outline' : 'happy-outline'}
+              size={24}
+              color={showComposerEmoji ? colors.primary : colors.textSecondary}
+            />
+          </TouchableOpacity>
           <TextInput
             ref={inputRef}
             style={[
@@ -1435,6 +1465,7 @@ export default function ChatScreen() {
             blurOnSubmit={false}
             textAlignVertical="top"
             onFocus={() => {
+              if (showComposerEmoji) setShowComposerEmoji(false);
               if (stickToBottomRef.current) {
                 requestAnimationFrame(() => scrollToLatest(true));
               }
@@ -1458,6 +1489,29 @@ export default function ChatScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        <AOEmojiPicker
+          visible={showComposerEmoji}
+          presentation="panel"
+          closeOnSelect={false}
+          searchPlaceholder={t.chat.searchEmoji}
+          emptyLabel={t.chat.noEmojiFound}
+          recentLabel={t.chat.recentEmojis}
+          premiumLockedLabel={t.chat.aoPremium}
+          onSelect={(emoji) => {
+            if (editingMessage) {
+              setEditText((prev) => `${prev}${emoji}`);
+            } else {
+              handleTyping(`${inputTextRef.current}${emoji}`);
+            }
+          }}
+          onClose={() => {
+            setShowComposerEmoji(false);
+            requestAnimationFrame(() => inputRef.current?.focus());
+          }}
+          colors={colors}
+          fonts={fonts}
+        />
       </View>
 
       <ReactionPicker
@@ -1465,6 +1519,8 @@ export default function ChatScreen() {
         title={t.chat.react}
         currentEmoji={getPrimarySelected() ? getUserReaction(getPrimarySelected()!) : undefined}
         searchPlaceholder={t.chat.searchEmoji}
+        emptyLabel={t.chat.noEmojiFound}
+        recentLabel={t.chat.recentEmojis}
         onSelect={handleReactionSelect}
         onClose={() => { setShowReactionPicker(false); clearSelection(); }}
         colors={colors}
@@ -1621,6 +1677,14 @@ const styles = StyleSheet.create({
     padding: Spacing.sm,
     paddingHorizontal: Spacing.md,
     gap: Spacing.sm,
+  },
+  emojiToggle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
   },
   textInput: {
     flex: 1,
