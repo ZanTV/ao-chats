@@ -1,5 +1,5 @@
-import React, { useCallback } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import React, { useCallback, useMemo } from 'react';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -14,8 +14,8 @@ import { MessageBubble } from './MessageBubble';
 import { Spacing } from '../../theme';
 import { clampOpacity } from '../../utils/reanimatedColors';
 
-const SWIPE_THRESHOLD = 52;
-const MAX_SWIPE = 76;
+const SWIPE_THRESHOLD = 44;
+const MAX_SWIPE = 72;
 
 interface ThemeColors {
   bubbleSent: string;
@@ -60,7 +60,6 @@ interface Props {
 
 function SwipeableMessageRowNative(props: Props) {
   const translateX = useSharedValue(0);
-  const replyArmed = useSharedValue(false);
 
   const fireReply = useCallback(() => {
     props.onSwipeReply();
@@ -69,39 +68,50 @@ function SwipeableMessageRowNative(props: Props) {
     }
   }, [props]);
 
-  const pan = Gesture.Pan()
-    .activeOffsetX(22)
-    .failOffsetY([-12, 12])
-    .onUpdate((e) => {
-      if (e.translationX > 0) {
-        translateX.value = Math.min(e.translationX * 0.88, MAX_SWIPE);
-        replyArmed.value = translateX.value >= SWIPE_THRESHOLD;
-      } else if (e.translationX <= 0) {
-        translateX.value = 0;
-        replyArmed.value = false;
-      }
-    })
-    .onEnd((e) => {
-      if (e.translationX >= SWIPE_THRESHOLD) {
-        runOnJS(fireReply)();
-      }
-      translateX.value = withSpring(0, { damping: 22, stiffness: 280 });
-      replyArmed.value = false;
-    });
+  const firePress = useCallback(() => {
+    props.onPress();
+  }, [props]);
 
-  const longPress = Gesture.LongPress()
-    .minDuration(280)
-    .maxDistance(10)
-    .onStart(() => {
-      runOnJS(props.onLongPress)();
-    });
+  const fireLongPress = useCallback(() => {
+    props.onLongPress();
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    }
+  }, [props]);
 
-  const tap = Gesture.Tap().onEnd(() => {
-    runOnJS(props.onPress)();
-  });
+  const gesture = useMemo(() => {
+    const longPress = Gesture.LongPress()
+      .minDuration(280)
+      .maxDistance(12)
+      .onStart(() => {
+        runOnJS(fireLongPress)();
+      });
 
-  const touch = Gesture.Exclusive(longPress, tap);
-  const composed = Gesture.Simultaneous(touch, pan);
+    const tap = Gesture.Tap()
+      .maxDuration(250)
+      .onEnd(() => {
+        runOnJS(firePress)();
+      });
+
+    const pan = Gesture.Pan()
+      .activeOffsetX([20, 9999])
+      .failOffsetY([-14, 14])
+      .onUpdate((e) => {
+        if (e.translationX > 0) {
+          translateX.value = Math.min(e.translationX * 0.9, MAX_SWIPE);
+        } else {
+          translateX.value = 0;
+        }
+      })
+      .onEnd((e) => {
+        if (e.translationX >= SWIPE_THRESHOLD) {
+          runOnJS(fireReply)();
+        }
+        translateX.value = withSpring(0, { damping: 22, stiffness: 280 });
+      });
+
+    return Gesture.Exclusive(pan, Gesture.Race(longPress, tap));
+  }, [fireLongPress, firePress, fireReply, translateX]);
 
   const rowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
@@ -116,7 +126,7 @@ function SwipeableMessageRowNative(props: Props) {
   });
 
   return (
-    <GestureDetector gesture={composed}>
+    <GestureDetector gesture={gesture}>
       <Animated.View style={[styles.row, props.compactBottom && styles.rowCompact, rowStyle]}>
         <Animated.View style={[styles.replyHint, replyHintStyle]}>
           <Ionicons name="arrow-undo" size={20} color={props.colors.primary} />
@@ -149,9 +159,14 @@ function SwipeableMessageRowNative(props: Props) {
 export function SwipeableMessageRow(props: Props) {
   if (Platform.OS === 'web') {
     return (
-      <View style={[styles.row, props.compactBottom && styles.rowCompact]}>
+      <Pressable
+        onPress={props.onPress}
+        onLongPress={props.onLongPress}
+        delayLongPress={280}
+        style={[styles.row, props.compactBottom && styles.rowCompact]}
+      >
         <MessageBubble {...props} />
-      </View>
+      </Pressable>
     );
   }
 

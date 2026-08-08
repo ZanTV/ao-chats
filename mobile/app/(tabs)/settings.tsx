@@ -6,10 +6,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useNotificationStore } from '../../src/stores/notificationStore';
+import { api } from '../../src/services/api';
 import { Avatar } from '../../src/components/Avatar';
 import { ThemeMode, FontSizeMode, Language } from '../../src/theme';
 import { Spacing, BorderRadius } from '../../src/theme';
-import { api } from '../../src/services/api';
+import { ConfirmDialog } from '../../src/components/ConfirmDialog';
 
 export default function SettingsScreen() {
   const { logout } = useAuthStore();
@@ -21,6 +22,8 @@ export default function SettingsScreen() {
   } = useSettingsStore();
   const { unreadCount, setPanelOpen } = useNotificationStore();
   const [openingSupport, setOpeningSupport] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const handleAoManagerChat = async () => {
     try {
@@ -39,17 +42,22 @@ export default function SettingsScreen() {
   };
 
   const handleLogout = () => {
-    Alert.alert(t.settings.logout, t.settings.logoutConfirm, [
-      { text: t.common.cancel, style: 'cancel' },
-      {
-        text: t.settings.logout,
-        style: 'destructive',
-        onPress: async () => {
-          await logout();
-          router.replace('/(auth)/login');
-        },
-      },
-    ]);
+    if (loggingOut) return;
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await logout();
+    } catch {
+      // Local session is cleared inside logout; still leave the app shell.
+    } finally {
+      setShowLogoutConfirm(false);
+      setLoggingOut(false);
+      router.replace('/(auth)/login');
+    }
   };
 
   return (
@@ -212,8 +220,13 @@ export default function SettingsScreen() {
         <TouchableOpacity
           style={[styles.logoutButton, { backgroundColor: colors.danger + '15' }]}
           onPress={handleLogout}
+          disabled={loggingOut}
         >
-          <Ionicons name="log-out-outline" size={22} color={colors.danger} />
+          {loggingOut ? (
+            <ActivityIndicator size="small" color={colors.danger} />
+          ) : (
+            <Ionicons name="log-out-outline" size={22} color={colors.danger} />
+          )}
           <Text style={[styles.logoutText, { color: colors.danger, fontSize: fonts.md }]}>
             {t.settings.logout}
           </Text>
@@ -223,6 +236,22 @@ export default function SettingsScreen() {
           AO Chats v2.0.0
         </Text>
       </ScrollView>
+
+      <ConfirmDialog
+        visible={showLogoutConfirm}
+        title={t.settings.logout}
+        message={t.settings.logoutConfirm}
+        confirmLabel={t.settings.logout}
+        cancelLabel={t.common.cancel}
+        destructive
+        busy={loggingOut}
+        onConfirm={() => { void confirmLogout(); }}
+        onCancel={() => {
+          if (!loggingOut) setShowLogoutConfirm(false);
+        }}
+        colors={colors}
+        fonts={fonts}
+      />
     </SafeAreaView>
   );
 }

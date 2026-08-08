@@ -121,8 +121,25 @@ export function MessageBubble({
         isOwn ? styles.wrapOwn : styles.wrapOther,
         compactBottom && styles.wrapCompact,
         highlightStyle,
+        isSelected && {
+          shadowColor: selectionRing,
+          shadowOpacity: 0.35,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 2 },
+          elevation: 8,
+        },
       ]}
     >
+      {isSelected ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.selectionAccent,
+            { backgroundColor: selectionRing },
+            isOwn ? styles.selectionAccentOwn : styles.selectionAccentOther,
+          ]}
+        />
+      ) : null}
       <View
         style={[
           styles.bubble,
@@ -148,6 +165,18 @@ export function MessageBubble({
             style={[StyleSheet.absoluteFill, styles.selectionOverlay, { backgroundColor: selectionOverlay }]}
           />
         ) : null}
+        {isSelected ? (
+          <View
+            style={[
+              styles.selectedBadge,
+              { backgroundColor: selectionRing },
+              isOwn ? styles.selectedBadgeOwn : styles.selectedBadgeOther,
+            ]}
+          >
+            <Ionicons name="checkmark" size={11} color="#FFFFFF" />
+          </View>
+        ) : null}
+
         {message.replyTo && (
           <ReplyQuotePreview
             replyTo={message.replyTo}
@@ -236,6 +265,30 @@ const styles = StyleSheet.create({
   wrapOwn: { alignSelf: 'flex-end' },
   wrapOther: { alignSelf: 'flex-start' },
   wrapCompact: { marginBottom: -2 },
+  selectionAccent: {
+    position: 'absolute',
+    top: 8,
+    bottom: 8,
+    width: 4,
+    borderRadius: 4,
+    zIndex: 2,
+  },
+  selectionAccentOwn: { right: -2 },
+  selectionAccentOther: { left: -2 },
+  selectedBadge: {
+    position: 'absolute',
+    top: -6,
+    zIndex: 3,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  selectedBadgeOwn: { right: -4 },
+  selectedBadgeOther: { left: -4 },
   bubble: {
     borderRadius: BorderRadius.xl,
     paddingHorizontal: Spacing.md,

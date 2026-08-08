@@ -94,14 +94,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    // Always clear local session even if the network call hangs or fails.
     try {
       const refresh = await getRefreshToken();
-      if (refresh) await api.logout(refresh);
+      if (refresh) {
+        await Promise.race([
+          api.logout(refresh).catch(() => undefined),
+          new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+        ]);
+      }
+    } catch {
+      // ignore remote logout errors
+    }
+    try {
+      socketService.disconnect();
     } catch {
       // ignore
     }
-    socketService.disconnect();
-    await clearTokens();
+    await clearTokens().catch(() => {});
     await clearCache().catch(() => {});
     set({ user: null, isAuthenticated: false, isLoading: false });
   },

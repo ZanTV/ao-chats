@@ -7,13 +7,13 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { router, Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../src/components/Avatar';
 import { ProfileSection, ProfileField } from '../../src/components/ProfileSection';
+import { ConfirmDialog } from '../../src/components/ConfirmDialog';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { formatDate, formatLastSeen } from '../../src/utils/profile';
@@ -28,6 +28,8 @@ export default function ProfileScreen() {
   const refreshFriendStats = useNotificationStore((s) => s.refreshFriendStats);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -51,17 +53,22 @@ export default function ProfileScreen() {
   };
 
   const handleLogout = () => {
-    Alert.alert(t.settings.logout, t.settings.logoutConfirm, [
-      { text: t.common.cancel, style: 'cancel' },
-      {
-        text: t.settings.logout,
-        style: 'destructive',
-        onPress: async () => {
-          await logout();
-          router.replace('/(auth)/login');
-        },
-      },
-    ]);
+    if (loggingOut) return;
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await logout();
+    } catch {
+      // Local session is cleared inside logout.
+    } finally {
+      setShowLogoutConfirm(false);
+      setLoggingOut(false);
+      router.replace('/(auth)/login');
+    }
   };
 
   if (!user) {
@@ -241,13 +248,34 @@ export default function ProfileScreen() {
         <TouchableOpacity
           style={[styles.logoutButton, { backgroundColor: colors.danger + '15' }]}
           onPress={handleLogout}
+          disabled={loggingOut}
         >
-          <Ionicons name="log-out-outline" size={22} color={colors.danger} />
+          {loggingOut ? (
+            <ActivityIndicator size="small" color={colors.danger} />
+          ) : (
+            <Ionicons name="log-out-outline" size={22} color={colors.danger} />
+          )}
           <Text style={[styles.logoutText, { color: colors.danger, fontSize: fonts.md }]}>
             {t.settings.logout}
           </Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <ConfirmDialog
+        visible={showLogoutConfirm}
+        title={t.settings.logout}
+        message={t.settings.logoutConfirm}
+        confirmLabel={t.settings.logout}
+        cancelLabel={t.common.cancel}
+        destructive
+        busy={loggingOut}
+        onConfirm={() => { void confirmLogout(); }}
+        onCancel={() => {
+          if (!loggingOut) setShowLogoutConfirm(false);
+        }}
+        colors={colors}
+        fonts={fonts}
+      />
     </SafeAreaView>
   );
 }

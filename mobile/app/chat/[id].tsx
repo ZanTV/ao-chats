@@ -28,7 +28,8 @@ import { PinnedBar } from '../../src/components/chat/PinnedBar';
 import { PinnedHistorySheet, PinnedEntry } from '../../src/components/chat/PinnedHistorySheet';
 import { UnreadDivider } from '../../src/components/chat/UnreadDivider';
 import { NewMessagesButton } from '../../src/components/chat/NewMessagesButton';
-import { ActionMenuSheet } from '../../src/components/ActionMenuSheet';
+import { ChatHeaderMenu } from '../../src/components/chat/ChatHeaderMenu';
+import { ConfirmDialog } from '../../src/components/ConfirmDialog';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useNotificationStore } from '../../src/stores/notificationStore';
@@ -36,7 +37,7 @@ import { useChatComposerStore } from '../../src/stores/chatComposerStore';
 import { useTypingStore } from '../../src/stores/typingStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
-import { cacheManager, CacheDomain, MESSAGE_PAGE_SIZE } from '../../src/cache';
+import { cacheManager, MESSAGE_PAGE_SIZE } from '../../src/cache';
 import { dedupeSocketHandler } from '../../src/utils/socketDedup';
 import { ApiError } from '../../src/utils/validation';
 import {
@@ -122,6 +123,8 @@ export default function ChatScreen() {
   const [pendingBelowCount, setPendingBelowCount] = useState(0);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearingChat, setClearingChat] = useState(false);
 
   const flatListRef = useRef<RNFlatList<ListItem>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -813,73 +816,42 @@ export default function ChatScreen() {
     setEditText('');
   };
 
-  const handleDeleteChat = useCallback(() => {
-    if (!conversationId) return;
-    Alert.alert(t.home.deleteChatTitle, t.home.deleteChatMessage, [
-      { text: t.common.cancel, style: 'cancel' },
-      {
-        text: t.common.delete,
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const cached = cacheManager.get<Array<{ id: string }>>(CacheDomain.CONVERSATIONS);
-            const previous = cached?.data ?? [];
-            const next = previous.filter((c) => c.id !== conversationId);
-            cacheManager.set(CacheDomain.CONVERSATIONS, next);
-            await api.hideConversation(conversationId);
-            goBack();
-          } catch (err) {
-            Alert.alert(t.common.error, err instanceof Error ? err.message : t.home.deleteFailed);
-          }
-        },
-      },
-    ]);
-  }, [conversationId, goBack, t]);
-
-  const handleClearChat = useCallback(() => {
-    if (!conversationId) return;
-    Alert.alert(t.chat.clearChat, t.chat.clearChatConfirm, [
-      { text: t.common.cancel, style: 'cancel' },
-      {
-        text: t.chat.clearChat,
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            applyMessages([]);
-            setPinnedMessages([]);
-            setPinnedIds(new Set());
-            setPinnedEntries([]);
-            setShowUnreadDivider(false);
-            setReplyTo(null);
-            setEditingMessage(null);
-            setEditText('');
-            await cacheManager.clearConversationMessages(conversationId);
-            useChatComposerStore.getState().clearDraft(conversationId);
-            await api.clearConversation(conversationId);
-          } catch (err) {
-            await loadMessages();
-            Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
-          }
-        },
-      },
-    ]);
-  }, [conversationId, applyMessages, loadMessages, t]);
+  const confirmClearChat = useCallback(async () => {
+    if (!conversationId || clearingChat) return;
+    setClearingChat(true);
+    try {
+      applyMessages([]);
+      setPinnedMessages([]);
+      setPinnedIds(new Set());
+      setPinnedEntries([]);
+      setShowUnreadDivider(false);
+      setReplyTo(null);
+      setEditingMessage(null);
+      setEditText('');
+      clearSelection();
+      await cacheManager.clearConversationMessages(conversationId);
+      useChatComposerStore.getState().clearDraft(conversationId);
+      await api.clearConversation(conversationId);
+      setShowClearConfirm(false);
+    } catch (err) {
+      await loadMessages();
+      Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
+    } finally {
+      setClearingChat(false);
+    }
+  }, [conversationId, clearingChat, applyMessages, clearSelection, loadMessages, t]);
 
   const chatMenuItems = useMemo(
     () => [
       {
         key: 'clear',
         label: t.chat.clearChat,
-        onPress: handleClearChat,
-      },
-      {
-        key: 'delete',
-        label: t.home.deleteChat,
+        icon: 'trash-outline' as const,
         destructive: true,
-        onPress: handleDeleteChat,
+        onPress: () => setShowClearConfirm(true),
       },
     ],
-    [handleClearChat, handleDeleteChat, t]
+    [t]
   );
 
   const primarySelected = getPrimarySelected();
@@ -1003,7 +975,8 @@ export default function ChatScreen() {
                 styles.selectedWrap,
                 {
                   backgroundColor: colors.selectionWrap,
-                  borderColor: colors.selectionRing + '55',
+                  borderColor: colors.selectionRing,
+                  borderWidth: 1.5,
                 },
               ]
             : undefined
@@ -1305,12 +1278,27 @@ export default function ChatScreen() {
         fonts={fonts}
       />
 
-      <ActionMenuSheet
+      <ChatHeaderMenu
         visible={showChatMenu}
-        title={t.home.chatOptions}
+        title={t.chat.chatSettings}
         items={chatMenuItems}
         onClose={() => setShowChatMenu(false)}
+        topOffset={Platform.OS === 'web' ? 72 : 60}
+        colors={colors}
+        fonts={fonts}
+      />
+
+      <ConfirmDialog
+        visible={showClearConfirm}
+        title={t.chat.clearChat}
+        message={t.chat.clearChatConfirm}
+        confirmLabel={t.chat.clearChat}
         cancelLabel={t.common.cancel}
+        destructive
+        onConfirm={() => { void confirmClearChat(); }}
+        onCancel={() => {
+          if (!clearingChat) setShowClearConfirm(false);
+        }}
         colors={colors}
         fonts={fonts}
       />
