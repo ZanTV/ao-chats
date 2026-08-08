@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BorderRadius, Spacing } from '../../theme';
+import { BorderRadius, Spacing } from '../theme';
 
 export type ConversationListAction = 'delete' | 'remove' | 'block';
 

@@ -65,7 +65,7 @@ export const ChatComposerField = forwardRef<TextInputType, Props>(function ChatC
   ref
 ) {
   const [focused, setFocused] = useState(false);
-  const [inputHeight, setInputHeight] = useState(ComposerLayout.minHeight);
+  const [inputHeight, setInputHeight] = useState<number>(ComposerLayout.minHeight);
 
   useEffect(() => {
     if (!value) {
