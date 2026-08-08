@@ -16,7 +16,7 @@ import {
   MESSAGE_HIGHLIGHT_FROM,
   MESSAGE_HIGHLIGHT_TO,
 } from '../../utils/reanimatedColors';
-import { BorderRadius, Spacing } from '../../theme';
+import { BorderRadius, Spacing, MessageBubbleLayout } from '../../theme';
 
 interface ThemeColors {
   bubbleSent: string;
@@ -130,6 +130,7 @@ export function MessageBubble({
       style={[
         styles.wrap,
         isOwn ? styles.wrapOwn : styles.wrapOther,
+        message.replyTo ? styles.wrapWithReply : null,
         compactBottom && styles.wrapCompact,
         highlightStyle,
         isSelected && {
@@ -281,7 +282,15 @@ export function MessageBubble({
 }
 
 const styles = StyleSheet.create({
-  wrap: { maxWidth: '84%', borderRadius: BorderRadius.xl, padding: 2 },
+  wrap: {
+    maxWidth: MessageBubbleLayout.maxWidthPercent,
+    borderRadius: BorderRadius.xl,
+    padding: 2,
+  },
+  /** Reply quotes need a comfortable floor so short replies don't shrink the bubble. */
+  wrapWithReply: {
+    minWidth: MessageBubbleLayout.replyMinWidthPercent,
+  },
   wrapOwn: { alignSelf: 'flex-end' },
   wrapOther: { alignSelf: 'flex-start' },
   wrapCompact: { marginBottom: -2 },

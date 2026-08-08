@@ -93,6 +93,7 @@ export const BorderRadius = {
 };
 
 export { ComposerLayout } from './composer';
+export { MessageBubbleLayout } from './messageBubble';
 
 export const FontSize = {
   small: { xs: 11, sm: 13, md: 15, lg: 17, xl: 20, xxl: 24, title: 28 },

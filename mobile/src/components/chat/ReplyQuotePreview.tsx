@@ -123,16 +123,21 @@ export function ReplyQuotePreview({
 }
 
 const styles = StyleSheet.create({
-  wrap: { marginBottom: Spacing.xs },
+  wrap: {
+    marginBottom: Spacing.xs,
+    alignSelf: 'stretch',
+  },
   container: {
     borderLeftWidth: 3.5,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: BorderRadius.lg,
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.xs + 2,
+    alignSelf: 'stretch',
   },
   bubbleContainer: {
     borderTopLeftRadius: BorderRadius.sm,
+    width: '100%',
   },
   composerContainer: {
     flex: 1,
@@ -144,7 +149,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   name: { fontWeight: '700', flex: 1 },
-  body: { flexDirection: 'row', alignItems: 'center' },
+  body: { flexDirection: 'row', alignItems: 'center', width: '100%' },
   mediaIcon: { marginRight: 4 },
   preview: { flex: 1, fontWeight: '500' },
 });
