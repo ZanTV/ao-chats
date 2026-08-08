@@ -7,7 +7,7 @@ services:
     runtime: node
     rootDir: backend
     branch: main
-    buildCommand: npm install && npm run build
+    buildCommand: npm install && npm run build && node scripts/migrate-deploy.mjs
     startCommand: node scripts/start-prod.mjs
     healthCheckPath: /health
     autoDeploy: true

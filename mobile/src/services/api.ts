@@ -98,6 +98,12 @@ class ApiClient {
     }
 
     if (!response.ok) {
+      if (response.status === 502 || response.status === 503) {
+        throw new ApiError(
+          'AO Chats server is starting up. Please wait a moment and try again.',
+          'SERVER_UNAVAILABLE'
+        );
+      }
       const err = await this.parseJsonSafe(response).catch(() => ({
         error: `Request failed (${response.status})`,
       }));

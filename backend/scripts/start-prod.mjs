@@ -24,10 +24,20 @@ await import('./prepare-env.mjs');
 
 try {
   await runNode('scripts/production-preflight.mjs', [], 'Production environment check');
-  await runNode('scripts/migrate-deploy.mjs', [], 'Database migrations (Prisma migrate deploy)');
 } catch (err) {
   console.error('\nDeploy aborted:', err.message);
   process.exit(1);
+}
+
+// Migrations run during Render/Railway build (see render.yaml buildCommand).
+// Running migrate here blocks the health check and causes 502 on cold starts.
+if (process.env.RUN_MIGRATE_ON_START === 'true') {
+  try {
+    await runNode('scripts/migrate-deploy.mjs', [], 'Database migrations (Prisma migrate deploy)');
+  } catch (err) {
+    console.error('\nMigration on start failed:', err.message);
+    process.exit(1);
+  }
 }
 
 console.log('\n→ Starting AO Chats API…');
