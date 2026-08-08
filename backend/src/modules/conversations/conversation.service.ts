@@ -2,6 +2,7 @@ import { prisma } from '../../config/database';
 import {
   cacheDel,
   cacheGetVersioned,
+  cacheInvalidatePattern,
   cacheSetVersioned,
   CacheKeys,
   CacheTTL,
@@ -102,7 +103,6 @@ export class ConversationService {
               where: {
                 deletedForAll: false,
                 NOT: { deletedFor: { has: userId } },
-                ...(p.clearedAt ? { createdAt: { gt: p.clearedAt } } : {}),
               },
               orderBy: { createdAt: 'desc' },
               take: 1,
@@ -138,7 +138,11 @@ export class ConversationService {
 
     const conversations = participations.map((p) => {
       const otherParticipant = p.conversation.participants.find((pp) => pp.userId !== userId);
-      const lastMessage = p.conversation.messages[0] || null;
+      const latestMessage = p.conversation.messages[0] || null;
+      const lastMessage =
+        latestMessage && p.clearedAt && latestMessage.createdAt <= p.clearedAt
+          ? null
+          : latestMessage;
 
       let preview: string | null = null;
       if (lastMessage) {

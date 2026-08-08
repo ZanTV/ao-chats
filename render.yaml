@@ -6,9 +6,11 @@ services:
     name: ao-chats-api
     runtime: node
     rootDir: backend
+    branch: main
     buildCommand: npm install && npm run build
     startCommand: node scripts/start-prod.mjs
     healthCheckPath: /health
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
