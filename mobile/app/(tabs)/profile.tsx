@@ -11,7 +11,7 @@ import {
 import { router, Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Avatar } from '../../src/components/Avatar';
+import { ProfilePhotoActions } from '../../src/components/ProfilePhotoActions';
 import { ProfileSection, ProfileField } from '../../src/components/ProfileSection';
 import { ConfirmDialog } from '../../src/components/ConfirmDialog';
 import { useAuthStore } from '../../src/stores/authStore';
@@ -109,10 +109,14 @@ export default function ProfileScreen() {
       >
         <View style={styles.header}>
           <View style={styles.avatarWrap}>
-            <Avatar
+            <ProfilePhotoActions
+              userId={user.id}
               avatarId={user.avatarId || 'avatar-1'}
               imageUrl={user.avatarUrl}
               imageVersion={user.avatarVersion}
+              firstName={user.firstName}
+              lastName={user.lastName}
+              username={user.username}
               size={110}
               showOnline
               isOnline={isOnline}

@@ -17,6 +17,7 @@ import { Input } from '../../src/components/Input';
 import { Button } from '../../src/components/Button';
 import { Avatar } from '../../src/components/Avatar';
 import { UniversityPicker } from '../../src/components/UniversityPicker';
+import { ConfirmDialog } from '../../src/components/ConfirmDialog';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
@@ -24,6 +25,7 @@ import { loadAvatarCategories, loadUniversities } from '../../src/services/signu
 import { validateUsername, validateMobileNumber } from '../../src/utils/validation';
 import { setPendingAvatarPhoto } from '../../src/profile/pendingAvatarPhoto';
 import { kindFromMimeClient, validatePendingAttachment } from '../../src/attachments/pending';
+import { invalidatePublicProfile, setCachedPublicProfile } from '../../src/cache/profileCache';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 const AVATAR_CATEGORIES = [
@@ -66,11 +68,21 @@ export default function EditProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [clearingPhoto, setClearingPhoto] = useState(false);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [needsAvatarPick, setNeedsAvatarPick] = useState(false);
+  const [avatarTouched, setAvatarTouched] = useState(false);
+  /** After remove / selecting AO avatar, preview emoji instead of stale custom URL */
+  const [preferEmojiPreview, setPreferEmojiPreview] = useState(false);
 
   useEffect(() => {
     loadAvatarCategories().then(setAvatarCategories);
     loadUniversities().then(setUniversities);
   }, []);
+
+  useEffect(() => {
+    if (!user?.avatarUrl) setPreferEmojiPreview(true);
+    else setPreferEmojiPreview(false);
+  }, [user?.avatarUrl]);
 
   const pickProfilePhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -105,18 +117,40 @@ export default function EditProfileScreen() {
     router.push('/profile/avatar-photo' as any);
   };
 
-  const removeCustomPhoto = async () => {
+  const confirmRemoveCustomPhoto = async () => {
     if (!user?.avatarUrl || clearingPhoto) return;
     setClearingPhoto(true);
     try {
       const updated = (await api.clearProfileAvatar()) as Parameters<typeof updateUser>[0];
       updateUser(updated);
-      Alert.alert('', t.profile.photoSaved);
+      if (updated.id) {
+        invalidatePublicProfile(updated.id);
+        setCachedPublicProfile({
+          id: updated.id,
+          username: updated.username,
+          firstName: updated.firstName,
+          lastName: updated.lastName,
+          avatarId: updated.avatarId || avatarId || 'avatar-1',
+          avatarUrl: null,
+          avatarVersion: updated.avatarVersion,
+        });
+      }
+      setPreferEmojiPreview(true);
+      setNeedsAvatarPick(true);
+      setAvatarTouched(false);
+      setShowRemoveConfirm(false);
+      Alert.alert('', t.profile.photoRemoved);
     } catch (err) {
       Alert.alert(t.common.error, err instanceof Error ? err.message : t.profile.photoFailed);
     } finally {
       setClearingPhoto(false);
     }
+  };
+
+  const selectAoAvatar = (id: string) => {
+    setAvatarId(id);
+    setAvatarTouched(true);
+    setPreferEmojiPreview(true);
   };
 
   const hasChanges =
@@ -128,7 +162,8 @@ export default function EditProfileScreen() {
     course !== initial.course ||
     statusMessage !== initial.statusMessage ||
     mobileNumber !== initial.mobileNumber ||
-    avatarId !== initial.avatarId;
+    avatarId !== initial.avatarId ||
+    (needsAvatarPick && avatarTouched);
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -145,6 +180,10 @@ export default function EditProfileScreen() {
   };
 
   const handleSave = async () => {
+    if (needsAvatarPick && !avatarTouched) {
+      Alert.alert('', t.profile.chooseAvatar);
+      return;
+    }
     if (!hasChanges) {
       Alert.alert('', t.profile.noChanges);
       return;
@@ -177,10 +216,15 @@ export default function EditProfileScreen() {
         avatarId,
       }) as Record<string, unknown>;
       updateUser(updated as Parameters<typeof updateUser>[0]);
+      if (typeof updated.id === 'string') {
+        invalidatePublicProfile(updated.id);
+      }
       const refreshed = await loadUser();
       if (!refreshed) {
         // Local update already applied — still treat as saved
       }
+      setNeedsAvatarPick(false);
+      setAvatarTouched(false);
       Alert.alert('Success', t.profile.saved, [{ text: 'OK', onPress: () => router.back() }]);
     } catch (err) {
       const message =
@@ -212,7 +256,7 @@ export default function EditProfileScreen() {
           <View style={styles.avatarSection}>
             <Avatar
               avatarId={avatarId}
-              imageUrl={user?.avatarUrl}
+              imageUrl={preferEmojiPreview ? null : user?.avatarUrl}
               imageVersion={user?.avatarVersion}
               size={88}
             />
@@ -225,15 +269,30 @@ export default function EditProfileScreen() {
                 {t.profile.changePhoto}
               </Text>
             </TouchableOpacity>
-            {user?.avatarUrl ? (
-              <TouchableOpacity onPress={removeCustomPhoto} disabled={clearingPhoto} style={{ marginTop: Spacing.xs }}>
+            {user?.avatarUrl && !preferEmojiPreview ? (
+              <TouchableOpacity
+                onPress={() => setShowRemoveConfirm(true)}
+                disabled={clearingPhoto}
+                style={{ marginTop: Spacing.xs }}
+              >
                 <Text style={{ color: colors.danger, fontSize: fonts.xs }}>
                   {clearingPhoto ? t.common.loading : t.profile.removePhoto}
                 </Text>
               </TouchableOpacity>
             ) : null}
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary, fontSize: fonts.sm, marginTop: Spacing.md }]}>
-              {t.profile.useAoAvatar}
+            <Text
+              style={[
+                styles.sectionLabel,
+                {
+                  color: needsAvatarPick ? colors.primary : colors.textSecondary,
+                  fontSize: fonts.sm,
+                  marginTop: Spacing.md,
+                },
+              ]}
+            >
+              {needsAvatarPick || !user?.avatarUrl || preferEmojiPreview
+                ? t.profile.chooseAvatar
+                : t.profile.useAoAvatar}
             </Text>
           </View>
 
@@ -255,7 +314,7 @@ export default function EditProfileScreen() {
             {(avatarCategories[selectedCategory] || []).map((id) => (
               <TouchableOpacity
                 key={id}
-                onPress={() => setAvatarId(id)}
+                onPress={() => selectAoAvatar(id)}
                 style={[styles.avatarItem, avatarId === id && { borderColor: colors.primary, borderWidth: 3 }]}
               >
                 <Avatar avatarId={id} size={52} />
@@ -320,6 +379,20 @@ export default function EditProfileScreen() {
           />
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <ConfirmDialog
+        visible={showRemoveConfirm}
+        title={t.profile.removePhoto}
+        message={t.profile.removePhotoConfirm}
+        confirmLabel={t.profile.removePhoto}
+        cancelLabel={t.common.cancel}
+        destructive
+        busy={clearingPhoto}
+        onConfirm={confirmRemoveCustomPhoto}
+        onCancel={() => setShowRemoveConfirm(false)}
+        colors={colors}
+        fonts={fonts}
+      />
     </SafeAreaView>
   );
 }

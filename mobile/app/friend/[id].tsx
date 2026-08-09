@@ -11,7 +11,7 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Avatar } from '../../src/components/Avatar';
+import { ProfilePhotoActions } from '../../src/components/ProfilePhotoActions';
 import { ConfirmDialog } from '../../src/components/ConfirmDialog';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useAuthStore } from '../../src/stores/authStore';
@@ -237,10 +237,14 @@ export default function FriendInfoScreen() {
         ) : null}
 
         <View style={styles.header}>
-          <Avatar
+          <ProfilePhotoActions
+            userId={profile.id}
             avatarId={profile.avatarId || 'avatar-1'}
             imageUrl={profile.avatarUrl}
             imageVersion={profile.avatarVersion}
+            firstName={profile.firstName}
+            lastName={profile.lastName}
+            username={profile.username}
             size={104}
             showOnline
             isOnline={profile.status === 'ONLINE'}

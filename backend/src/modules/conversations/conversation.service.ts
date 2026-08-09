@@ -466,13 +466,30 @@ export class ConversationService {
     >`
       SELECT
         COUNT(*) FILTER (
-          WHERE m.attachment IS NOT NULL AND (m.attachment->>'kind') = 'image'
+          WHERE m.attachment IS NOT NULL
+            AND (
+              (m.attachment->>'kind') = 'image'
+              OR LOWER(COALESCE(m.attachment->>'mimeType', '')) LIKE 'image/%'
+            )
         ) AS images,
         COUNT(*) FILTER (
-          WHERE m.attachment IS NOT NULL AND (m.attachment->>'kind') = 'video'
+          WHERE m.attachment IS NOT NULL
+            AND (
+              (m.attachment->>'kind') = 'video'
+              OR LOWER(COALESCE(m.attachment->>'mimeType', '')) LIKE 'video/%'
+            )
         ) AS videos,
         COUNT(*) FILTER (
-          WHERE m.attachment IS NOT NULL AND (m.attachment->>'kind') = 'document'
+          WHERE m.attachment IS NOT NULL
+            AND (
+              (m.attachment->>'kind') = 'document'
+              OR (
+                m.type::text = 'FILE'
+                AND COALESCE(m.attachment->>'kind', '') NOT IN ('image', 'video')
+                AND LOWER(COALESCE(m.attachment->>'mimeType', '')) NOT LIKE 'image/%'
+                AND LOWER(COALESCE(m.attachment->>'mimeType', '')) NOT LIKE 'video/%'
+              )
+            )
         ) AS documents,
         COUNT(*) FILTER (
           WHERE m.content ~* '(https?://|www\\.)'
@@ -504,7 +521,7 @@ export class ConversationService {
   ) {
     const participant = await this.assertParticipant(conversationId, userId);
     const clearedAt = participant.clearedAt;
-    const limit = Math.min(Math.max(options.limit || 40, 1), 80);
+    const limit = Math.min(Math.max(options.limit || 30, 1), 80);
     const cursorDate = options.cursor ? new Date(options.cursor) : null;
 
     if (options.type === 'link') {
@@ -547,6 +564,9 @@ export class ConversationService {
     }
 
     const kind = options.type;
+    // Sent + received; respect delete-for-me / delete-for-everyone / clearedAt.
+    // Documents also include FILE attachments whose kind/mime is not image/video
+    // (covers older rows where kind may be missing).
     const rows = await prisma.$queryRaw<
       Array<{
         messageId: string;
@@ -563,11 +583,32 @@ export class ConversationService {
       FROM messages m
       WHERE m.conversation_id = ${conversationId}
         AND m.attachment IS NOT NULL
-        AND (m.attachment->>'kind') = ${kind}
         AND m.deleted_for_all = false
         AND NOT (${userId} = ANY (m.deleted_for))
         AND (${clearedAt}::timestamptz IS NULL OR m.created_at > ${clearedAt})
         AND (${cursorDate}::timestamptz IS NULL OR m.created_at < ${cursorDate})
+        AND (
+          CASE
+            WHEN ${kind} = 'document' THEN (
+              (m.attachment->>'kind') = 'document'
+              OR (
+                m.type::text = 'FILE'
+                AND COALESCE(m.attachment->>'kind', '') NOT IN ('image', 'video')
+                AND LOWER(COALESCE(m.attachment->>'mimeType', '')) NOT LIKE 'image/%'
+                AND LOWER(COALESCE(m.attachment->>'mimeType', '')) NOT LIKE 'video/%'
+              )
+            )
+            WHEN ${kind} = 'image' THEN (
+              (m.attachment->>'kind') = 'image'
+              OR LOWER(COALESCE(m.attachment->>'mimeType', '')) LIKE 'image/%'
+            )
+            WHEN ${kind} = 'video' THEN (
+              (m.attachment->>'kind') = 'video'
+              OR LOWER(COALESCE(m.attachment->>'mimeType', '')) LIKE 'video/%'
+            )
+            ELSE (m.attachment->>'kind') = ${kind}
+          END
+        )
       ORDER BY m.created_at DESC
       LIMIT ${limit + 1}
     `;

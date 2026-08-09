@@ -19,7 +19,9 @@ import {
 } from '../../src/profile/pendingAvatarPhoto';
 import { uploadProfileAvatar } from '../../src/attachments/uploadProfileAvatar';
 import { setCachedPublicProfile, invalidatePublicProfile } from '../../src/cache/profileCache';
+import { ProfileSaveSuccessToast } from '../../src/components/ProfileSaveSuccessToast';
 import { Spacing, BorderRadius } from '../../src/theme';
+import type { User } from '../../src/stores/authStore';
 
 export default function AvatarPhotoPreviewScreen() {
   const { colors, fonts, t } = useSettingsStore();
@@ -27,6 +29,7 @@ export default function AvatarPhotoPreviewScreen() {
   const [uri, setUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   useEffect(() => {
     const pending = peekPendingAvatarPhoto();
@@ -38,42 +41,50 @@ export default function AvatarPhotoPreviewScreen() {
   }, []);
 
   const handleCancel = () => {
+    if (saving || showSuccess) return;
     setPendingAvatarPhoto(null);
     router.back();
   };
 
+  const applySavedProfile = (updated: User) => {
+    if (!updated?.avatarUrl) {
+      throw new Error(t.profile.photoSaveFailed);
+    }
+    updateUser(updated);
+    if (updated.id) {
+      invalidatePublicProfile(updated.id);
+      setCachedPublicProfile({
+        id: updated.id,
+        username: updated.username,
+        firstName: updated.firstName,
+        lastName: updated.lastName,
+        avatarId: updated.avatarId || 'avatar-1',
+        avatarUrl: updated.avatarUrl,
+        avatarVersion: updated.avatarVersion,
+        university: updated.university,
+        course: updated.course,
+        bio: updated.bio,
+        status: updated.status,
+        statusMessage: updated.statusMessage,
+        lastSeen: updated.lastSeen,
+        isVerified: updated.isVerified,
+      });
+    }
+  };
+
   const handleSave = async () => {
     const pending = takePendingAvatarPhoto();
-    if (!pending || saving) return;
+    if (!pending || saving || showSuccess) return;
     setSaving(true);
     try {
       const updated = await uploadProfileAvatar(pending, (p) => setProgress(p));
-      updateUser(updated);
-      if (updated.id) {
-        invalidatePublicProfile(updated.id);
-        setCachedPublicProfile({
-          id: updated.id,
-          username: updated.username,
-          firstName: updated.firstName,
-          lastName: updated.lastName,
-          avatarId: updated.avatarId || 'avatar-1',
-          avatarUrl: updated.avatarUrl,
-          avatarVersion: updated.avatarVersion,
-          university: updated.university,
-          course: updated.course,
-          bio: updated.bio,
-          status: updated.status,
-          statusMessage: updated.statusMessage,
-          lastSeen: updated.lastSeen,
-          isVerified: updated.isVerified,
-        });
-      }
-      Alert.alert('', t.profile.photoSaved, [{ text: 'OK', onPress: () => router.back() }]);
+      applySavedProfile(updated);
+      setShowSuccess(true);
     } catch (err) {
       setPendingAvatarPhoto(pending);
       Alert.alert(
         t.common.error,
-        err instanceof Error ? err.message : t.profile.photoFailed
+        err instanceof Error ? err.message : t.profile.photoSaveFailed
       );
     } finally {
       setSaving(false);
@@ -83,13 +94,13 @@ export default function AvatarPhotoPreviewScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={handleCancel} disabled={saving}>
+        <TouchableOpacity onPress={handleCancel} disabled={saving || showSuccess}>
           <Text style={{ color: colors.textSecondary, fontSize: fonts.md }}>{t.profile.cancel}</Text>
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.text, fontSize: fonts.lg }]}>
           {t.profile.photoPreview}
         </Text>
-        <TouchableOpacity onPress={handleSave} disabled={saving || !uri}>
+        <TouchableOpacity onPress={handleSave} disabled={saving || !uri || showSuccess}>
           <Text style={{ color: colors.primary, fontSize: fonts.md, fontWeight: '600' }}>
             {t.profile.save}
           </Text>
@@ -122,6 +133,17 @@ export default function AvatarPhotoPreviewScreen() {
           </Text>
         )}
       </View>
+
+      <ProfileSaveSuccessToast
+        visible={showSuccess}
+        message={t.profile.photoSaved}
+        colors={colors}
+        fonts={fonts}
+        onDone={() => {
+          setShowSuccess(false);
+          router.back();
+        }}
+      />
     </SafeAreaView>
   );
 }
