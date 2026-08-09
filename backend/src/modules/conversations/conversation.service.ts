@@ -20,6 +20,8 @@ import {
   sortConversations,
 } from '../../utils/conversation.utils';
 import { fetchUnreadCountsByConversation } from './unreadCounts';
+import { config } from '../../config';
+import { normalizeAttachmentPayload } from '../../utils/attachment';
 
 const listParticipantUserSelect = {
   id: true,
@@ -623,7 +625,7 @@ export class ConversationService {
         messageId: r.messageId,
         content: r.content,
         createdAt: r.createdAt.toISOString(),
-        attachment: r.attachment,
+        attachment: normalizeAttachmentPayload(r.attachment, config.apiUrl),
       })),
       nextCursor,
       hasMore,

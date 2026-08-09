@@ -1,5 +1,5 @@
 export type { MessageAttachment, AttachmentKind } from './types';
-export { formatFileSize, isMessageAttachment, UPLOAD_LIMITS } from './types';
+export { formatFileSize, isMessageAttachment, coerceAttachment, UPLOAD_LIMITS } from './types';
 export type { PendingAttachment } from './pending';
 export {
   kindFromMimeClient,
@@ -15,4 +15,5 @@ export {
   buildMediaShareLink,
   saveAttachmentToDevice,
   shareAttachmentFile,
+  resolveAttachmentUrl,
 } from './storage';

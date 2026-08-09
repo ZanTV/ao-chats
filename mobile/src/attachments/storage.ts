@@ -68,9 +68,17 @@ export async function getLocalAttachment(
   return row;
 }
 
-function authenticatedDownloadUrl(attachment: MessageAttachment): string {
+/** Resolve authenticated download URL from storageKey (source of truth for previews). */
+export function resolveAttachmentUrl(attachment: Pick<MessageAttachment, 'storageKey' | 'url'>): string {
   const base = getApiUrl().replace(/\/$/, '');
-  return `${base}/uploads/files/${encodeURIComponent(attachment.storageKey)}`;
+  if (attachment.storageKey) {
+    return `${base}/uploads/files/${encodeURIComponent(attachment.storageKey)}`;
+  }
+  return attachment.url || '';
+}
+
+function authenticatedDownloadUrl(attachment: MessageAttachment): string {
+  return resolveAttachmentUrl(attachment);
 }
 
 async function attachmentDir(): Promise<string> {

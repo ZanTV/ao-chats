@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
@@ -14,23 +13,25 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
-import { getAccessToken } from '../../src/services/storage';
-import type { MessageAttachment } from '../../src/attachments/types';
-import { formatFileSize, isMessageAttachment } from '../../src/attachments/types';
+import { socketService } from '../../src/services/socket';
+import { coerceAttachment, type MessageAttachment } from '../../src/attachments/types';
 import { detectEntities, type DetectedEntity } from '../../src/links/detect';
 import { DetectedContactActionSheet } from '../../src/components/chat/DetectedContactActionSheet';
+import { SharedMediaPreview } from '../../src/components/SharedMediaPreview';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 type MediaItem = {
   messageId: string;
   content: string;
   createdAt: string;
-  attachment?: MessageAttachment;
+  attachment?: MessageAttachment | null;
 };
 
 const COLS = 3;
+const H_PAD = 4;
 const GAP = 2;
-const TILE = Math.floor((Dimensions.get('window').width - GAP * (COLS + 1)) / COLS);
+const SCREEN_W = Dimensions.get('window').width;
+const TILE = Math.floor((SCREEN_W - H_PAD * 2 - GAP * (COLS - 1)) / COLS);
 
 export default function FriendSharedMediaScreen() {
   const { conversationId, type } = useLocalSearchParams<{
@@ -38,7 +39,7 @@ export default function FriendSharedMediaScreen() {
     type: string;
     userId?: string;
   }>();
-  const mediaType = (String(type || 'image') as 'image' | 'video' | 'document' | 'link');
+  const mediaType = String(type || 'image') as 'image' | 'video' | 'document' | 'link';
   const cid = String(conversationId || '');
   const { colors, fonts, t } = useSettingsStore();
 
@@ -47,7 +48,6 @@ export default function FriendSharedMediaScreen() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [authHeaders, setAuthHeaders] = useState<Record<string, string>>();
   const [linkEntity, setLinkEntity] = useState<DetectedEntity | null>(null);
 
   const title =
@@ -59,11 +59,7 @@ export default function FriendSharedMediaScreen() {
           ? t.friendInfo.links
           : t.friendInfo.photos;
 
-  useEffect(() => {
-    getAccessToken().then((token) => {
-      if (token) setAuthHeaders({ Authorization: `Bearer ${token}` });
-    });
-  }, []);
+  const isGrid = mediaType === 'image' || mediaType === 'video';
 
   const load = useCallback(
     async (next?: string | null, append = false) => {
@@ -71,13 +67,14 @@ export default function FriendSharedMediaScreen() {
       if (append) setLoadingMore(true);
       else setLoading(true);
       try {
-        const res = await api.getConversationMedia(cid, mediaType, next || undefined);
+        const res = await api.getConversationMedia(cid, mediaType, next || undefined, 30);
         const mapped: MediaItem[] = (res.items || []).map((row) => ({
           messageId: row.messageId,
           content: row.content,
           createdAt: row.createdAt,
-          attachment: isMessageAttachment(row.attachment) ? row.attachment : undefined,
+          attachment: coerceAttachment(row.attachment),
         }));
+        // Server already sorts createdAt DESC — keep stable newest-first
         setItems((prev) => (append ? [...prev, ...mapped] : mapped));
         setCursor(res.nextCursor || null);
         setHasMore(Boolean(res.hasMore));
@@ -95,7 +92,33 @@ export default function FriendSharedMediaScreen() {
     void load();
   }, [load]);
 
-  const openAttachment = (attachment?: MessageAttachment) => {
+  // Realtime: refresh list when new media arrives or messages are deleted
+  useEffect(() => {
+    if (!cid) return;
+    const refresh = () => {
+      void load(null, false);
+    };
+    const unsubs = [
+      socketService.on('message:new', (data: unknown) => {
+        const msg = data as { conversationId?: string; attachment?: unknown; type?: string };
+        if (msg.conversationId !== cid) return;
+        if (!msg.attachment && msg.type === 'TEXT') return;
+        refresh();
+      }),
+      socketService.on('message:delete', (data: unknown) => {
+        const payload = data as { conversationId?: string; messageId?: string };
+        if (payload.conversationId !== cid) return;
+        if (payload.messageId) {
+          setItems((prev) => prev.filter((i) => i.messageId !== payload.messageId));
+        } else {
+          refresh();
+        }
+      }),
+    ];
+    return () => unsubs.forEach((u) => u());
+  }, [cid, load]);
+
+  const openAttachment = (attachment?: MessageAttachment | null) => {
     if (!attachment?.id) return;
     router.push(`/media/${attachment.id}` as any);
   };
@@ -108,13 +131,23 @@ export default function FriendSharedMediaScreen() {
     setLinkEntity(entities[0]);
   };
 
-  const formatSharedDate = (iso: string) => {
-    const d = new Date(iso);
-    return `${t.friendInfo.sharedOn} ${d.toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-    })}`;
-  };
+  const skeleton = useMemo(
+    () =>
+      Array.from({ length: 9 }, (_, i) => (
+        <View
+          key={`sk-${i}`}
+          style={{
+            width: TILE,
+            height: TILE,
+            marginBottom: GAP,
+            marginRight: (i + 1) % COLS === 0 ? 0 : GAP,
+            borderRadius: BorderRadius.sm,
+            backgroundColor: colors.surfaceSecondary,
+          }}
+        />
+      )),
+    [colors.surfaceSecondary]
+  );
 
   const renderItem = ({ item }: { item: MediaItem }) => {
     if (mediaType === 'link') {
@@ -133,7 +166,11 @@ export default function FriendSharedMediaScreen() {
               {primary?.display || item.content}
             </Text>
             <Text style={{ color: colors.textTertiary, fontSize: fonts.xs, marginTop: 2 }}>
-              {formatSharedDate(item.createdAt)}
+              {t.friendInfo.sharedOn}{' '}
+              {new Date(item.createdAt).toLocaleDateString(undefined, {
+                month: 'short',
+                day: 'numeric',
+              })}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
@@ -141,57 +178,28 @@ export default function FriendSharedMediaScreen() {
       );
     }
 
-    if (mediaType === 'document') {
-      const a = item.attachment;
-      const ext = (a?.fileName || '').split('.').pop()?.toUpperCase() || 'FILE';
+    if (!item.attachment) {
       return (
-        <TouchableOpacity
-          style={[styles.docRow, { borderBottomColor: colors.border }]}
-          onPress={() => openAttachment(a)}
-        >
-          <View style={[styles.docIcon, { backgroundColor: colors.surfaceSecondary }]}>
-            <Ionicons name="document-text-outline" size={24} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.text, fontSize: fonts.md, fontWeight: '500' }} numberOfLines={1}>
-              {a?.fileName || 'Document'}
-            </Text>
-            <Text style={{ color: colors.textSecondary, fontSize: fonts.xs, marginTop: 2 }}>
-              {ext} · {formatFileSize(a?.fileSize || 0)}
-            </Text>
-            <Text style={{ color: colors.textTertiary, fontSize: fonts.xs, marginTop: 2 }}>
-              {formatSharedDate(item.createdAt)}
-            </Text>
-          </View>
-        </TouchableOpacity>
+        <View
+          style={[
+            isGrid
+              ? { width: TILE, height: TILE, backgroundColor: colors.surfaceSecondary, borderRadius: BorderRadius.sm }
+              : styles.linkRow,
+          ]}
+        />
       );
     }
 
-    const a = item.attachment;
-    const uri = a?.url;
     return (
-      <TouchableOpacity style={styles.tile} onPress={() => openAttachment(a)}>
-        {uri ? (
-          <Image
-            source={{ uri, headers: authHeaders }}
-            style={styles.tileImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.tileImage, { backgroundColor: colors.surfaceSecondary, alignItems: 'center', justifyContent: 'center' }]}>
-            <Ionicons
-              name={mediaType === 'video' ? 'videocam' : 'image'}
-              size={28}
-              color={colors.textTertiary}
-            />
-          </View>
-        )}
-        {mediaType === 'video' && (
-          <View style={styles.playBadge}>
-            <Ionicons name="play" size={16} color="#fff" />
-          </View>
-        )}
-      </TouchableOpacity>
+      <SharedMediaPreview
+        attachment={item.attachment}
+        createdAt={item.createdAt}
+        tileSize={TILE}
+        colors={colors}
+        fonts={fonts}
+        sharedOnLabel={t.friendInfo.sharedOn}
+        onPress={() => openAttachment(item.attachment)}
+      />
     );
   };
 
@@ -206,9 +214,15 @@ export default function FriendSharedMediaScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
+        isGrid ? (
+          <View style={[styles.skeletonWrap, { paddingHorizontal: H_PAD, paddingTop: H_PAD }]}>
+            {skeleton}
+          </View>
+        ) : (
+          <View style={styles.centered}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        )
       ) : items.length === 0 ? (
         <View style={styles.centered}>
           <Text style={{ color: colors.textSecondary }}>{t.friendInfo.emptyMedia}</Text>
@@ -217,13 +231,16 @@ export default function FriendSharedMediaScreen() {
         <FlatList
           data={items}
           keyExtractor={(item, index) => `${item.messageId}-${index}`}
-          numColumns={mediaType === 'image' || mediaType === 'video' ? COLS : 1}
+          numColumns={isGrid ? COLS : 1}
           key={mediaType}
           renderItem={renderItem}
+          columnWrapperStyle={
+            isGrid
+              ? { paddingHorizontal: H_PAD, gap: GAP, marginBottom: GAP }
+              : undefined
+          }
           contentContainerStyle={
-            mediaType === 'image' || mediaType === 'video'
-              ? { padding: GAP }
-              : { paddingVertical: Spacing.sm }
+            isGrid ? { paddingTop: H_PAD, paddingBottom: Spacing.xl } : { paddingVertical: Spacing.sm }
           }
           onEndReached={() => {
             if (hasMore && cursor && !loadingMore) void load(cursor, true);
@@ -263,6 +280,7 @@ export default function FriendSharedMediaScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  skeletonWrap: { flexDirection: 'row', flexWrap: 'wrap' },
   nav: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -272,42 +290,6 @@ const styles = StyleSheet.create({
   },
   navBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   navTitle: { flex: 1, textAlign: 'center', fontWeight: '600' },
-  tile: {
-    width: TILE,
-    height: TILE,
-    margin: GAP / 2,
-  },
-  tileImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: BorderRadius.sm,
-  },
-  playBadge: {
-    position: 'absolute',
-    right: 6,
-    bottom: 6,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  docRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  docIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   linkRow: {
     flexDirection: 'row',
     alignItems: 'center',

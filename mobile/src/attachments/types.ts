@@ -40,7 +40,35 @@ export function isMessageAttachment(value: unknown): value is MessageAttachment 
     typeof a.id === 'string' &&
     typeof a.storageKey === 'string' &&
     typeof a.fileName === 'string' &&
-    typeof a.mimeType === 'string' &&
-    typeof a.url === 'string'
+    typeof a.mimeType === 'string'
   );
+}
+
+/** Coerce API attachment JSON into a usable MessageAttachment (url optional). */
+export function coerceAttachment(value: unknown): MessageAttachment | null {
+  if (!value || typeof value !== 'object') return null;
+  const a = value as Partial<MessageAttachment> & { kind?: string };
+  if (typeof a.id !== 'string' || typeof a.storageKey !== 'string') return null;
+  const mime = typeof a.mimeType === 'string' ? a.mimeType : 'application/octet-stream';
+  const kindRaw = a.kind;
+  const kind: AttachmentKind =
+    kindRaw === 'image' || kindRaw === 'video' || kindRaw === 'document'
+      ? kindRaw
+      : mime.startsWith('image/')
+        ? 'image'
+        : mime.startsWith('video/')
+          ? 'video'
+          : 'document';
+  return {
+    id: a.id,
+    storageKey: a.storageKey,
+    fileName: typeof a.fileName === 'string' ? a.fileName : 'file',
+    mimeType: mime,
+    fileSize: typeof a.fileSize === 'number' ? a.fileSize : 0,
+    kind,
+    url: typeof a.url === 'string' ? a.url : '',
+    width: a.width,
+    height: a.height,
+    duration: a.duration,
+  };
 }

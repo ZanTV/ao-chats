@@ -26,6 +26,7 @@ import { validateUsername, validateMobileNumber } from '../../src/utils/validati
 import { setPendingAvatarPhoto } from '../../src/profile/pendingAvatarPhoto';
 import { kindFromMimeClient, validatePendingAttachment } from '../../src/attachments/pending';
 import { invalidatePublicProfile, setCachedPublicProfile } from '../../src/cache/profileCache';
+import { ProfileSaveSuccessToast } from '../../src/components/ProfileSaveSuccessToast';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 const AVATAR_CATEGORIES = [
@@ -61,7 +62,7 @@ export default function EditProfileScreen() {
   const [course, setCourse] = useState(initial.course);
   const [statusMessage, setStatusMessage] = useState(initial.statusMessage);
   const [mobileNumber, setMobileNumber] = useState(initial.mobileNumber);
-  const [avatarId, setAvatarId] = useState(initial.avatarId);
+  const [selectedAvatarId, setSelectedAvatarId] = useState(initial.avatarId);
   const [avatarCategories, setAvatarCategories] = useState<Record<string, string[]>>({});
   const [universities, setUniversities] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('animals');
@@ -73,6 +74,7 @@ export default function EditProfileScreen() {
   const [avatarTouched, setAvatarTouched] = useState(false);
   /** After remove / selecting AO avatar, preview emoji instead of stale custom URL */
   const [preferEmojiPreview, setPreferEmojiPreview] = useState(false);
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
 
   useEffect(() => {
     loadAvatarCategories().then(setAvatarCategories);
@@ -130,7 +132,7 @@ export default function EditProfileScreen() {
           username: updated.username,
           firstName: updated.firstName,
           lastName: updated.lastName,
-          avatarId: updated.avatarId || avatarId || 'avatar-1',
+          avatarId: updated.avatarId || selectedAvatarId || 'avatar-1',
           avatarUrl: null,
           avatarVersion: updated.avatarVersion,
         });
@@ -148,7 +150,7 @@ export default function EditProfileScreen() {
   };
 
   const selectAoAvatar = (id: string) => {
-    setAvatarId(id);
+    setSelectedAvatarId(id);
     setAvatarTouched(true);
     setPreferEmojiPreview(true);
   };
@@ -162,7 +164,7 @@ export default function EditProfileScreen() {
     course !== initial.course ||
     statusMessage !== initial.statusMessage ||
     mobileNumber !== initial.mobileNumber ||
-    avatarId !== initial.avatarId ||
+    selectedAvatarId !== initial.avatarId ||
     (needsAvatarPick && avatarTouched);
 
   const validate = (): boolean => {
@@ -213,7 +215,7 @@ export default function EditProfileScreen() {
         course: course.trim() || undefined,
         statusMessage: statusMessage.trim() || undefined,
         mobileNumber: mobileNumber.trim() || '',
-        avatarId,
+        avatarId: selectedAvatarId,
       }) as Record<string, unknown>;
       updateUser(updated as Parameters<typeof updateUser>[0]);
       if (typeof updated.id === 'string') {
@@ -225,7 +227,7 @@ export default function EditProfileScreen() {
       }
       setNeedsAvatarPick(false);
       setAvatarTouched(false);
-      Alert.alert('Success', t.profile.saved, [{ text: 'OK', onPress: () => router.back() }]);
+      setShowSaveSuccess(true);
     } catch (err) {
       const message =
         err instanceof Error
@@ -255,7 +257,7 @@ export default function EditProfileScreen() {
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.avatarSection}>
             <Avatar
-              avatarId={avatarId}
+              avatarId={selectedAvatarId}
               imageUrl={preferEmojiPreview ? null : user?.avatarUrl}
               imageVersion={user?.avatarVersion}
               size={88}
@@ -311,15 +313,30 @@ export default function EditProfileScreen() {
           </ScrollView>
 
           <View style={styles.avatarGrid}>
-            {(avatarCategories[selectedCategory] || []).map((id) => (
-              <TouchableOpacity
-                key={id}
-                onPress={() => selectAoAvatar(id)}
-                style={[styles.avatarItem, avatarId === id && { borderColor: colors.primary, borderWidth: 3 }]}
-              >
-                <Avatar avatarId={id} size={52} />
-              </TouchableOpacity>
-            ))}
+            {(avatarCategories[selectedCategory] || []).map((id) => {
+              const isSelected = selectedAvatarId === id;
+              return (
+                <TouchableOpacity
+                  key={id}
+                  onPress={() => selectAoAvatar(id)}
+                  style={[
+                    styles.avatarItem,
+                    {
+                      borderColor: isSelected ? colors.primary : 'transparent',
+                      borderWidth: 3,
+                    },
+                  ]}
+                  accessibilityState={{ selected: isSelected }}
+                >
+                  <Avatar avatarId={id} size={52} />
+                  {isSelected ? (
+                    <View style={[styles.avatarCheck, { backgroundColor: colors.primary }]}>
+                      <Ionicons name="checkmark" size={12} color="#FFF" />
+                    </View>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           <Input label={t.auth.firstName} value={firstName} onChangeText={setFirstName} error={errors.firstName} />
@@ -393,6 +410,17 @@ export default function EditProfileScreen() {
         colors={colors}
         fonts={fonts}
       />
+
+      <ProfileSaveSuccessToast
+        visible={showSaveSuccess}
+        message={t.profile.saved}
+        colors={colors}
+        fonts={fonts}
+        onDone={() => {
+          setShowSaveSuccess(false);
+          router.back();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -433,7 +461,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: Spacing.lg,
   },
-  avatarItem: { borderRadius: 30, padding: 2, borderWidth: 3, borderColor: 'transparent' },
+  avatarItem: {
+    borderRadius: 30,
+    padding: 2,
+    borderWidth: 3,
+    borderColor: 'transparent',
+    position: 'relative',
+  },
+  avatarCheck: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFF',
+  },
   sectionLabel: { fontWeight: '600', marginBottom: Spacing.sm, marginTop: Spacing.sm },
   privateNote: {
     flexDirection: 'row',
