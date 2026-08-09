@@ -62,6 +62,7 @@ interface Props {
   seeLessLabel?: string;
   editedLabel?: string;
   onEntityPress?: (entity: DetectedEntity) => void;
+  onOpenViewer?: (attachment: import('../../attachments/types').MessageAttachment) => void;
   mediaLabels?: {
     download: string;
     downloading: string;
@@ -89,6 +90,7 @@ export function MessageBubble({
   seeLessLabel = 'See less',
   editedLabel = 'edited',
   onEntityPress,
+  onOpenViewer,
   mediaLabels,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
@@ -255,6 +257,7 @@ export function MessageBubble({
               retry: 'Retry',
               open: 'Open',
             }}
+            onOpenViewer={onOpenViewer}
             renderCaption={(caption) =>
               onEntityPress ? (
                 <LinkedMessageText

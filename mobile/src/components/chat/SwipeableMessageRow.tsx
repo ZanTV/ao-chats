@@ -64,6 +64,7 @@ interface Props {
   onReplyPress?: (messageId: string) => void;
   onReactionPress?: (emoji: string) => void;
   onEntityPress?: (entity: import('../../links/detect').DetectedEntity) => void;
+  onOpenViewer?: (attachment: import('../../attachments/types').MessageAttachment) => void;
   mediaLabels?: {
     download: string;
     downloading: string;
@@ -93,6 +94,7 @@ function BubbleContent(props: Props) {
       onReplyPress={props.onReplyPress}
       onReactionPress={props.onReactionPress}
       onEntityPress={props.onEntityPress}
+      onOpenViewer={props.onOpenViewer}
       mediaLabels={props.mediaLabels}
       currentUserId={props.currentUserId}
       deletedLabel={props.deletedLabel}

@@ -1322,6 +1322,9 @@ export default function ChatScreen() {
           onReplyPress={scrollToMessage}
           onReactionPress={(emoji) => handleReactionChipPress(message, emoji)}
           onEntityPress={(entity) => setActiveEntity(entity)}
+          onOpenViewer={(attachment) => {
+            router.push(`/media/${attachment.id}` as any);
+          }}
           mediaLabels={{
             download: t.chat.download,
             downloading: t.chat.downloading,

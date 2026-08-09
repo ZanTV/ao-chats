@@ -11,4 +11,8 @@ export {
   ensureLocalAttachment,
   getLocalAttachment,
   seedLocalAttachment,
+  clearAttachmentCache,
+  buildMediaShareLink,
+  saveAttachmentToDevice,
+  shareAttachmentFile,
 } from './storage';

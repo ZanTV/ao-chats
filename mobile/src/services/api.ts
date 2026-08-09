@@ -397,6 +397,25 @@ class ApiClient {
 
   getStarredMessages = () => this.request('/messages/starred');
 
+  getMedia = (attachmentId: string) =>
+    this.request<{
+      media: {
+        attachment: import('../attachments/types').MessageAttachment;
+        messageId: string;
+        conversationId: string;
+        content: string;
+        type: string;
+        createdAt: string;
+        sender: {
+          id: string;
+          firstName: string;
+          lastName: string;
+          avatarId: string;
+        };
+      };
+      gallery: import('../attachments/types').MessageAttachment[];
+    }>(`/media/${attachmentId}`);
+
   getFriendStats = () =>
     this.request<{ friendCount: number; pendingReceivedCount: number; pendingSentCount: number }>(
       '/friends/stats'

@@ -61,10 +61,12 @@ module.exports = ({ config }) => ({
       'expo-media-library',
       {
         photosPermission: 'Allow AO Chats to show recent photos for quick sharing.',
-        savePhotosPermission: false,
+        savePhotosPermission: 'Allow AO Chats to save media you explicitly choose to keep.',
         isAccessMediaLocationEnabled: false,
       },
     ],
+    'expo-video',
+    'expo-sharing',
   ],
   experiments: {
     typedRoutes: true,

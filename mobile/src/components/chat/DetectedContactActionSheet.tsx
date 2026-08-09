@@ -76,7 +76,7 @@ async function performOpen(entity: DetectedEntity) {
     try {
       const parsed = new URL(entity.value);
       const path = `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
-      if (path.startsWith('/chat/') || path.startsWith('/u/') || path === '/' || path.startsWith('/(tabs)')) {
+      if (path.startsWith('/chat/') || path.startsWith('/media/') || path.startsWith('/u/') || path === '/' || path.startsWith('/(tabs)')) {
         router.push(path as any);
         return;
       }

@@ -11,6 +11,7 @@ import { Avatar } from '../../src/components/Avatar';
 import { ThemeMode, FontSizeMode, Language } from '../../src/theme';
 import { Spacing, BorderRadius } from '../../src/theme';
 import { ConfirmDialog } from '../../src/components/ConfirmDialog';
+import { clearAttachmentCache } from '../../src/attachments/storage';
 
 export default function SettingsScreen() {
   const { logout } = useAuthStore();
@@ -24,6 +25,8 @@ export default function SettingsScreen() {
   const [openingSupport, setOpeningSupport] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [showClearMediaConfirm, setShowClearMediaConfirm] = useState(false);
+  const [clearingMedia, setClearingMedia] = useState(false);
 
   const handleAoManagerChat = async () => {
     try {
@@ -57,6 +60,20 @@ export default function SettingsScreen() {
       setShowLogoutConfirm(false);
       setLoggingOut(false);
       router.replace('/(auth)/login');
+    }
+  };
+
+  const confirmClearMediaCache = async () => {
+    if (clearingMedia) return;
+    setClearingMedia(true);
+    try {
+      await clearAttachmentCache();
+      Alert.alert(t.media.clearCache, t.media.clearCacheDone);
+    } catch (err) {
+      Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
+    } finally {
+      setClearingMedia(false);
+      setShowClearMediaConfirm(false);
     }
   };
 
@@ -207,6 +224,16 @@ export default function SettingsScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.linkRow, { borderBottomColor: colors.border }]}
+            onPress={() => setShowClearMediaConfirm(true)}
+          >
+            <Ionicons name="trash-outline" size={22} color={colors.text} />
+            <Text style={[styles.linkText, { color: colors.text, fontSize: fonts.md }]}>
+              {t.media.clearCache}
+            </Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.linkRow, { borderBottomColor: colors.border }]}
             onPress={() => router.push('/settings/blocked')}
           >
             <Ionicons name="ban-outline" size={22} color={colors.text} />
@@ -248,6 +275,22 @@ export default function SettingsScreen() {
         onConfirm={() => { void confirmLogout(); }}
         onCancel={() => {
           if (!loggingOut) setShowLogoutConfirm(false);
+        }}
+        colors={colors}
+        fonts={fonts}
+      />
+
+      <ConfirmDialog
+        visible={showClearMediaConfirm}
+        title={t.media.clearCache}
+        message={t.media.clearCacheConfirm}
+        confirmLabel={t.media.clearCache}
+        cancelLabel={t.common.cancel}
+        destructive
+        busy={clearingMedia}
+        onConfirm={() => { void confirmClearMediaCache(); }}
+        onCancel={() => {
+          if (!clearingMedia) setShowClearMediaConfirm(false);
         }}
         colors={colors}
         fonts={fonts}

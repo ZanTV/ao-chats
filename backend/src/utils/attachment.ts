@@ -94,3 +94,14 @@ export function formatFileSize(bytes: number): string {
   const gb = mb / 1024;
   return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`;
 }
+
+export function isMessageAttachmentLike(value: unknown): value is MessageAttachment {
+  if (!value || typeof value !== 'object') return false;
+  const a = value as MessageAttachment;
+  return (
+    typeof a.id === 'string' &&
+    typeof a.storageKey === 'string' &&
+    typeof a.fileName === 'string' &&
+    typeof a.mimeType === 'string'
+  );
+}

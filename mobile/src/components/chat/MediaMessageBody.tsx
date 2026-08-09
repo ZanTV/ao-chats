@@ -132,6 +132,10 @@ export function MediaMessageBody({
         <TouchableOpacity
           activeOpacity={0.9}
           onPress={() => {
+            if (onOpenViewer) {
+              openLocal();
+              return;
+            }
             if (state === 'DOWNLOADED') openLocal();
             else if (state !== 'DOWNLOADING') startDownload();
           }}
@@ -171,7 +175,11 @@ export function MediaMessageBody({
         <TouchableOpacity
           style={[styles.videoPlaceholder, { backgroundColor: isOwn ? 'rgba(0,0,0,0.25)' : surfaceColor }]}
           activeOpacity={0.85}
-          onPress={state === 'DOWNLOADED' ? openLocal : startDownload}
+          onPress={() => {
+            if (onOpenViewer) openLocal();
+            else if (state === 'DOWNLOADED') openLocal();
+            else startDownload();
+          }}
         >
           <Ionicons name="play-circle" size={48} color={textColor} />
           <Text style={{ color: mutedColor, fontSize: fonts.xs, marginTop: 6 }}>
@@ -209,7 +217,11 @@ export function MediaMessageBody({
       <TouchableOpacity
         style={styles.docRow}
         activeOpacity={0.8}
-        onPress={state === 'DOWNLOADED' ? openLocal : startDownload}
+        onPress={() => {
+          if (onOpenViewer) openLocal();
+          else if (state === 'DOWNLOADED') openLocal();
+          else startDownload();
+        }}
       >
         <View style={[styles.docIcon, { backgroundColor: isOwn ? 'rgba(255,255,255,0.18)' : surfaceColor }]}>
           {state === 'DOWNLOADING' ? (

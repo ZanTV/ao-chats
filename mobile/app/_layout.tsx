@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import React, { useEffect, useState, useCallback } from 'react';
-import { Stack, Redirect, useSegments } from 'expo-router';
+import { Stack, Redirect, useSegments, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -17,22 +17,29 @@ import { hydrateLocalCache } from '../src/cache';
 import { initializePushNotifications, unregisterPushNotifications } from '../src/services/pushService';
 import { warmupApi } from '../src/services/apiHealth';
 import { perfMark, perfMeasure } from '../src/utils/perfTimings';
+import { setPendingDeepLink, consumePendingDeepLink } from '../src/navigation/pendingDeepLink';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuthStore();
   const segments = useSegments();
+  const pathname = usePathname();
 
   if (isLoading) return <LoadingScreen />;
 
   const inAuthGroup = segments[0] === '(auth)';
 
   if (!isAuthenticated && !inAuthGroup) {
+    if (pathname?.startsWith('/media/')) {
+      setPendingDeepLink(pathname);
+    }
     return <Redirect href="/(auth)/login" />;
   }
 
   if (isAuthenticated && inAuthGroup) {
+    const pending = consumePendingDeepLink();
+    if (pending) return <Redirect href={pending as any} />;
     return <Redirect href="/(tabs)" />;
   }
 
@@ -126,6 +133,7 @@ export default function RootLayout() {
               <Stack.Screen name="(auth)/forgot-password" />
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="chat/[id]" options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="media/[id]" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
               <Stack.Screen name="starred" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="profile/edit" options={{ animation: 'slide_from_bottom' }} />
               <Stack.Screen name="settings/blocked" options={{ animation: 'slide_from_right' }} />
