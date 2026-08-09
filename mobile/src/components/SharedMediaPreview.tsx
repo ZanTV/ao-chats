@@ -8,10 +8,10 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { MessageAttachment } from '../../attachments/types';
-import { formatFileSize } from '../../attachments/types';
-import { ensureLocalAttachment, getLocalAttachment } from '../../attachments/storage';
-import { BorderRadius, Spacing } from '../../theme';
+import type { MessageAttachment } from '../attachments/types';
+import { formatFileSize } from '../attachments/types';
+import { ensureLocalAttachment, getLocalAttachment } from '../attachments/storage';
+import { BorderRadius, Spacing } from '../theme';
 
 type Props = {
   attachment: MessageAttachment;
