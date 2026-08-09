@@ -12,6 +12,7 @@ import {
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { Input } from '../../src/components/Input';
 import { Button } from '../../src/components/Button';
 import { Avatar } from '../../src/components/Avatar';
@@ -21,6 +22,8 @@ import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
 import { loadAvatarCategories, loadUniversities } from '../../src/services/signupOptions';
 import { validateUsername, validateMobileNumber } from '../../src/utils/validation';
+import { setPendingAvatarPhoto } from '../../src/profile/pendingAvatarPhoto';
+import { kindFromMimeClient, validatePendingAttachment } from '../../src/attachments/pending';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 const AVATAR_CATEGORIES = [
@@ -62,11 +65,59 @@ export default function EditProfileScreen() {
   const [selectedCategory, setSelectedCategory] = useState('animals');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [clearingPhoto, setClearingPhoto] = useState(false);
 
   useEffect(() => {
     loadAvatarCategories().then(setAvatarCategories);
     loadUniversities().then(setUniversities);
   }, []);
+
+  const pickProfilePhoto = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert(t.common.error, "You don't have permission to access photos.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.9,
+      allowsMultipleSelection: false,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    const mime = asset.mimeType || 'image/jpeg';
+    const file = {
+      localUri: asset.uri,
+      mimeType: mime,
+      fileName: asset.fileName || 'avatar.jpg',
+      fileSize: asset.fileSize || 0,
+      kind: kindFromMimeClient(mime),
+      width: asset.width,
+      height: asset.height,
+      previewUri: asset.uri,
+    };
+    const err = validatePendingAttachment(file);
+    if (err) {
+      Alert.alert(t.common.error, err);
+      return;
+    }
+    setPendingAvatarPhoto(file);
+    router.push('/profile/avatar-photo' as any);
+  };
+
+  const removeCustomPhoto = async () => {
+    if (!user?.avatarUrl || clearingPhoto) return;
+    setClearingPhoto(true);
+    try {
+      const updated = (await api.clearProfileAvatar()) as Parameters<typeof updateUser>[0];
+      updateUser(updated);
+      Alert.alert('', t.profile.photoSaved);
+    } catch (err) {
+      Alert.alert(t.common.error, err instanceof Error ? err.message : t.profile.photoFailed);
+    } finally {
+      setClearingPhoto(false);
+    }
+  };
 
   const hasChanges =
     firstName !== initial.firstName ||
@@ -159,7 +210,31 @@ export default function EditProfileScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.avatarSection}>
-            <Avatar avatarId={avatarId} size={88} />
+            <Avatar
+              avatarId={avatarId}
+              imageUrl={user?.avatarUrl}
+              imageVersion={user?.avatarVersion}
+              size={88}
+            />
+            <TouchableOpacity
+              style={[styles.changePhotoBtn, { backgroundColor: colors.surfaceSecondary }]}
+              onPress={pickProfilePhoto}
+            >
+              <Ionicons name="camera-outline" size={16} color={colors.primary} />
+              <Text style={{ color: colors.primary, fontSize: fonts.sm, fontWeight: '600' }}>
+                {t.profile.changePhoto}
+              </Text>
+            </TouchableOpacity>
+            {user?.avatarUrl ? (
+              <TouchableOpacity onPress={removeCustomPhoto} disabled={clearingPhoto} style={{ marginTop: Spacing.xs }}>
+                <Text style={{ color: colors.danger, fontSize: fonts.xs }}>
+                  {clearingPhoto ? t.common.loading : t.profile.removePhoto}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary, fontSize: fonts.sm, marginTop: Spacing.md }]}>
+              {t.profile.useAoAvatar}
+            </Text>
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
@@ -262,6 +337,15 @@ const styles = StyleSheet.create({
   headerTitle: { fontWeight: '700' },
   scroll: { padding: Spacing.lg, paddingBottom: Spacing.xxl },
   avatarSection: { alignItems: 'center', marginBottom: Spacing.md },
+  changePhotoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+  },
   categoryScroll: { marginBottom: Spacing.md },
   categoryChip: {
     paddingHorizontal: Spacing.md,

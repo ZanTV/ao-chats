@@ -146,4 +146,39 @@ router.post(
   })
 );
 
+router.get(
+  '/:id/media/summary',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const summary = await conversationService.getSharedMediaSummary(
+      paramId(req.params.id),
+      req.userId!
+    );
+    res.json(summary);
+  })
+);
+
+router.get(
+  '/:id/media',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const typeRaw = String(req.query.type || 'image').toLowerCase();
+    const allowed = new Set(['image', 'video', 'document', 'link']);
+    if (!allowed.has(typeRaw)) {
+      res.status(400).json({ error: 'Invalid media type' });
+      return;
+    }
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    const result = await conversationService.listSharedMedia(
+      paramId(req.params.id),
+      req.userId!,
+      {
+        type: typeRaw as 'image' | 'video' | 'document' | 'link',
+        cursor,
+        limit: Number.isFinite(limit) ? limit : undefined,
+      }
+    );
+    res.json(result);
+  })
+);
+
 export default router;

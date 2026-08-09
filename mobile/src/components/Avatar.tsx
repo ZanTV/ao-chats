@@ -1,10 +1,15 @@
-import React from 'react';
-import { View, Text, StyleSheet, ViewStyle } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ViewStyle, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AvatarColors, AvatarEmojis, BorderRadius } from '../theme';
+import { getAccessToken } from '../services/storage';
+import { bustAvatarUrl } from '../utils/avatarUrl';
 
 interface AvatarProps {
   avatarId: string;
+  /** Custom profile photo URL (authenticated). Falls back to AO emoji avatar when missing/broken. */
+  imageUrl?: string | null;
+  imageVersion?: number | null;
   size?: number;
   showOnline?: boolean;
   isOnline?: boolean;
@@ -14,6 +19,8 @@ interface AvatarProps {
 
 export function Avatar({
   avatarId,
+  imageUrl,
+  imageVersion,
   size = 48,
   showOnline,
   isOnline,
@@ -22,6 +29,31 @@ export function Avatar({
 }: AvatarProps) {
   const color = AvatarColors[avatarId] || AvatarColors['avatar-30'];
   const emoji = AvatarEmojis[avatarId] || '💠';
+  const [authHeaders, setAuthHeaders] = useState<Record<string, string> | undefined>();
+  const [imageFailed, setImageFailed] = useState(false);
+
+  const displayUrl = bustAvatarUrl(imageUrl, imageVersion);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [displayUrl]);
+
+  useEffect(() => {
+    if (!displayUrl) {
+      setAuthHeaders(undefined);
+      return;
+    }
+    let cancelled = false;
+    getAccessToken().then((token) => {
+      if (cancelled || !token) return;
+      setAuthHeaders({ Authorization: `Bearer ${token}` });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [displayUrl]);
+
+  const showImage = Boolean(displayUrl) && !imageFailed;
 
   return (
     <View style={[{ width: size, height: size }, style]}>
@@ -33,10 +65,20 @@ export function Avatar({
             height: size,
             borderRadius: size / 2,
             backgroundColor: color + '20',
+            overflow: 'hidden',
           },
         ]}
       >
-        <Text style={{ fontSize: size * 0.45 }}>{emoji}</Text>
+        {showImage ? (
+          <Image
+            source={{ uri: displayUrl!, headers: authHeaders }}
+            style={{ width: size, height: size }}
+            onError={() => setImageFailed(true)}
+            accessibilityIgnoresInvertColors
+          />
+        ) : (
+          <Text style={{ fontSize: size * 0.45 }}>{emoji}</Text>
+        )}
       </View>
       {showOnline && (
         <View

@@ -13,6 +13,7 @@ export const MESSAGE_PAGE_SIZE = 30;
 
 export const CacheDomain = {
   USER_PROFILE: 'user_profile',
+  PUBLIC_PROFILE: 'public_profile',
   FRIENDS: 'friends',
   CONVERSATIONS: 'conversations',
   NOTIFICATIONS: 'notifications',

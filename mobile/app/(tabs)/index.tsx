@@ -539,6 +539,8 @@ export default function HomeScreen() {
         ) : null}
         <Avatar
           avatarId={item.otherUser?.avatarId || 'avatar-30'}
+          imageUrl={(item.otherUser as { avatarUrl?: string } | undefined)?.avatarUrl}
+          imageVersion={(item.otherUser as { avatarVersion?: number } | undefined)?.avatarVersion}
           size={56}
           showOnline
           isOnline={item.otherUser?.status === 'ONLINE'}

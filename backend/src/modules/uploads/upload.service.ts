@@ -9,6 +9,8 @@ import {
   maxBytesForMime,
   isAllowedMime,
   sanitizeFileName,
+  ALLOWED_IMAGE_MIME,
+  UPLOAD_LIMITS,
   type MessageAttachment,
 } from '../../utils/attachment';
 
@@ -75,9 +77,69 @@ export class UploadService {
     };
   }
 
+  /**
+   * Persist a custom profile photo under profiles/{userId}/… (not chat attachments).
+   */
+  async saveProfileAvatar(params: {
+    uploaderId: string;
+    buffer: Buffer;
+    originalName: string;
+    mimeType: string;
+  }): Promise<{ storageKey: string; url: string; mimeType: string; fileSize: number }> {
+    const mime = (params.mimeType || '').toLowerCase();
+    if (!ALLOWED_IMAGE_MIME.has(mime) && !mime.startsWith('image/')) {
+      throw new AppError(400, 'Profile photos must be an image.');
+    }
+    if (params.buffer.length > UPLOAD_LIMITS.maxImageBytes) {
+      throw new AppError(400, 'This file is too large to upload.');
+    }
+    if (params.buffer.length === 0) {
+      throw new AppError(400, 'Empty file.');
+    }
+
+    ensureUploadRoot();
+    const id = randomUUID();
+    const safeName = sanitizeFileName(params.originalName || 'avatar.jpg');
+    const storageKey = `profiles/${params.uploaderId}/${id}-${safeName}`;
+    const dest = resolveUploadPath(storageKey);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, params.buffer);
+
+    const publicPath = `/api/uploads/files/${encodeURIComponent(storageKey)}`;
+    const base = config.apiUrl.replace(/\/$/, '');
+
+    return {
+      storageKey,
+      url: `${base}${publicPath}`,
+      mimeType: mime,
+      fileSize: params.buffer.length,
+    };
+  }
+
   async assertCanAccessFile(userId: string, storageKey: string): Promise<void> {
-    // Owner path prefix OR participant in a message that references this key
+    // Owner chat uploads
     if (storageKey.startsWith(`${userId}/`)) return;
+
+    // Profile photos: owner or any authenticated user who is not in a block relationship
+    if (storageKey.startsWith('profiles/')) {
+      const ownerId = storageKey.split('/')[1];
+      if (!ownerId) throw new AppError(400, 'Invalid storage key');
+      if (ownerId === userId) return;
+
+      const blocked = await prisma.block.findFirst({
+        where: {
+          OR: [
+            { blockerId: userId, blockedId: ownerId },
+            { blockerId: ownerId, blockedId: userId },
+          ],
+        },
+        select: { id: true },
+      });
+      if (blocked) {
+        throw new AppError(403, "You don't have permission to access this file.");
+      }
+      return;
+    }
 
     const rows = await prisma.$queryRaw<{ ok: number }[]>`
       SELECT 1 AS ok

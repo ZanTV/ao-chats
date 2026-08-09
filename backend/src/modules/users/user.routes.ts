@@ -1,13 +1,31 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { userService } from './user.service';
 import { updateProfileSchema } from './user.validation';
 import { searchUsersSchema } from '../auth/auth.validation';
 import { validateBody, validateQuery } from '../../middleware/validation';
 import { authenticate, AuthRequest } from '../../middleware/auth';
-import { asyncHandler } from '../../middleware/errorHandler';
+import { asyncHandler, AppError } from '../../middleware/errorHandler';
 import { paramId } from '../../utils/params';
+import { UPLOAD_LIMITS } from '../../utils/attachment';
+import { getIO } from '../../sockets';
 
 const router = Router();
+
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: UPLOAD_LIMITS.maxImageBytes },
+});
+
+function emitProfileUpdated(userId: string, avatarVersion: number) {
+  const io = getIO();
+  if (!io) return;
+  io.emit('profile_updated', {
+    userId,
+    avatarVersion,
+    updatedAt: new Date().toISOString(),
+  });
+}
 
 router.use(authenticate);
 
@@ -24,6 +42,42 @@ router.patch(
   validateBody(updateProfileSchema),
   asyncHandler(async (req: AuthRequest, res) => {
     const profile = await userService.updateProfile(req.userId!, req.body);
+    if (req.body?.avatarId) {
+      emitProfileUpdated(req.userId!, profile.avatarVersion ?? 0);
+    }
+    res.json(profile);
+  })
+);
+
+router.post(
+  '/me/avatar',
+  avatarUpload.single('file'),
+  asyncHandler(async (req: AuthRequest, res) => {
+    const file = req.file;
+    if (!file) throw new AppError(400, 'No image uploaded.');
+    try {
+      const profile = await userService.setProfileAvatar(req.userId!, {
+        buffer: file.buffer,
+        originalName: file.originalname || 'avatar.jpg',
+        mimeType: file.mimetype,
+      });
+      emitProfileUpdated(req.userId!, profile.avatarVersion ?? 0);
+      res.json(profile);
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      if ((err as { code?: string })?.code === 'LIMIT_FILE_SIZE') {
+        throw new AppError(400, 'This file is too large to upload.');
+      }
+      throw err;
+    }
+  })
+);
+
+router.delete(
+  '/me/avatar',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const profile = await userService.clearProfileAvatar(req.userId!);
+    emitProfileUpdated(req.userId!, profile.avatarVersion ?? 0);
     res.json(profile);
   })
 );

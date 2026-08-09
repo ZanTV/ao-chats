@@ -111,6 +111,8 @@ export default function ProfileScreen() {
           <View style={styles.avatarWrap}>
             <Avatar
               avatarId={user.avatarId || 'avatar-1'}
+              imageUrl={user.avatarUrl}
+              imageVersion={user.avatarVersion}
               size={110}
               showOnline
               isOnline={isOnline}

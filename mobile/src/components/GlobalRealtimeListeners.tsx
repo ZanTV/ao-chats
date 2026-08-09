@@ -3,10 +3,12 @@ import { socketService } from '../services/socket';
 import { useTypingStore } from '../stores/typingStore';
 import { useAuthStore } from '../stores/authStore';
 import { cacheManager } from '../cache';
+import { CacheDomain } from '../cache/types';
+import { invalidatePublicProfile } from '../cache/profileCache';
 
 /** Subscribes to app-wide socket events (typing, etc.) outside individual screens. */
 export function GlobalRealtimeListeners() {
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, user, refreshProfile } = useAuthStore();
   const setTyping = useTypingStore((s) => s.setTyping);
 
   useEffect(() => {
@@ -38,10 +40,20 @@ export function GlobalRealtimeListeners() {
         if (!hideForMe) return;
         cacheManager.deleteMessages(payload.conversationId, [payload.messageId]).catch(() => {});
       }),
+      socketService.on('profile_updated', (data: unknown) => {
+        const payload = data as { userId?: string; avatarVersion?: number };
+        if (!payload?.userId) return;
+        invalidatePublicProfile(payload.userId);
+        cacheManager.remove(CacheDomain.CONVERSATIONS);
+        cacheManager.remove(CacheDomain.FRIENDS);
+        if (payload.userId === user?.id) {
+          void refreshProfile();
+        }
+      }),
     ];
 
     return () => unsubs.forEach((u) => u());
-  }, [isAuthenticated, user?.id, setTyping]);
+  }, [isAuthenticated, user?.id, setTyping, refreshProfile]);
 
   return null;
 }

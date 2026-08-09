@@ -54,6 +54,10 @@ model User {
   bio               String?
   mobileNumber      String?      @unique @map("mobile_number")
   avatarId          String       @default("avatar-1") @map("avatar_id")
+  /// Authenticated URL for custom profile photo (null = use default AO avatarId emoji)
+  avatarUrl         String?      @map("avatar_url")
+  /// Bumped only when the custom profile photo changes (cache busting)
+  avatarVersion     Int          @default(0) @map("avatar_version")
   status            UserStatus   @default(OFFLINE)
   statusMessage     String?      @map("status_message")
   emailVerified     Boolean      @default(false) @map("email_verified")

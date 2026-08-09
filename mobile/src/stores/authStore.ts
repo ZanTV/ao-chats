@@ -22,6 +22,8 @@ export interface User {
   firstName: string;
   lastName: string;
   avatarId?: string;
+  avatarUrl?: string | null;
+  avatarVersion?: number;
   university?: string;
   course?: string;
   bio?: string;

@@ -48,7 +48,7 @@ export class FriendService {
       data: { senderId, receiverId },
       include: {
         sender: {
-          select: { id: true, username: true, firstName: true, lastName: true, avatarId: true },
+          select: { id: true, username: true, firstName: true, lastName: true, avatarId: true, avatarUrl: true, avatarVersion: true },
         },
       },
     });
@@ -177,13 +177,13 @@ export class FriendService {
         user1: {
           select: {
             id: true, username: true, firstName: true, lastName: true,
-            avatarId: true, status: true, lastSeen: true, university: true,
+            avatarId: true, avatarUrl: true, avatarVersion: true, status: true, lastSeen: true, university: true,
           },
         },
         user2: {
           select: {
             id: true, username: true, firstName: true, lastName: true,
-            avatarId: true, status: true, lastSeen: true, university: true,
+            avatarId: true, avatarUrl: true, avatarVersion: true, status: true, lastSeen: true, university: true,
           },
         },
       },
@@ -201,7 +201,7 @@ export class FriendService {
         sender: {
           select: {
             id: true, username: true, firstName: true, lastName: true,
-            avatarId: true, university: true,
+            avatarId: true, avatarUrl: true, avatarVersion: true, university: true,
           },
         },
       },
@@ -215,7 +215,7 @@ export class FriendService {
       include: {
         receiver: {
           select: {
-            id: true, username: true, firstName: true, lastName: true, avatarId: true,
+            id: true, username: true, firstName: true, lastName: true, avatarId: true, avatarUrl: true, avatarVersion: true,
           },
         },
       },
@@ -287,7 +287,7 @@ export class FriendService {
       include: {
         blocked: {
           select: {
-            id: true, username: true, firstName: true, lastName: true, avatarId: true,
+            id: true, username: true, firstName: true, lastName: true, avatarId: true, avatarUrl: true, avatarVersion: true,
           },
         },
       },

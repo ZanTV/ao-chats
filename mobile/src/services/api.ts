@@ -242,6 +242,8 @@ class ApiClient {
   getProfile = () => this.request('/users/me');
   updateProfile = (data: Record<string, unknown>) =>
     this.request('/users/me', { method: 'PATCH', body: JSON.stringify(data) });
+  clearProfileAvatar = () =>
+    this.request('/users/me/avatar', { method: 'DELETE' });
   searchUsers = (q: string) => this.request(`/users/search?q=${encodeURIComponent(q)}`);
   getUser = (id: string) => this.request(`/users/${id}`);
 
@@ -415,6 +417,37 @@ class ApiClient {
       };
       gallery: import('../attachments/types').MessageAttachment[];
     }>(`/media/${attachmentId}`);
+
+  getConversationMediaSummary = (conversationId: string) =>
+    this.request<{
+      images: number;
+      videos: number;
+      documents: number;
+      links: number;
+    }>(`/conversations/${conversationId}/media/summary`);
+
+  getConversationMedia = (
+    conversationId: string,
+    type: 'image' | 'video' | 'document' | 'link',
+    cursor?: string,
+    limit = 40
+  ) => {
+    const params = new URLSearchParams();
+    params.set('type', type);
+    params.set('limit', String(limit));
+    if (cursor) params.set('cursor', cursor);
+    return this.request<{
+      type: string;
+      items: Array<{
+        messageId: string;
+        content: string;
+        createdAt: string;
+        attachment?: import('../attachments/types').MessageAttachment;
+      }>;
+      nextCursor?: string | null;
+      hasMore?: boolean;
+    }>(`/conversations/${conversationId}/media?${params.toString()}`);
+  };
 
   getFriendStats = () =>
     this.request<{ friendCount: number; pendingReceivedCount: number; pendingSentCount: number }>(

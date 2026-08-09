@@ -11,6 +11,8 @@ const SCHEMA_PATCHES = [
   // Unique index is applied by merge-duplicate-direct-conversations.mjs after dedupe.
   `ALTER TABLE "conversations" ADD COLUMN IF NOT EXISTS "direct_pair_key" TEXT`,
   `ALTER TABLE "messages" ADD COLUMN IF NOT EXISTS "attachment" JSONB`,
+  `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar_url" TEXT`,
+  `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar_version" INTEGER NOT NULL DEFAULT 0`,
 ] as const;
 
 export async function ensureProductionSchema(): Promise<void> {

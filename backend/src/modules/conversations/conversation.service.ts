@@ -27,6 +27,8 @@ const listParticipantUserSelect = {
   firstName: true,
   lastName: true,
   avatarId: true,
+  avatarUrl: true,
+  avatarVersion: true,
   status: true,
   lastSeen: true,
   isVerified: true,
@@ -445,6 +447,146 @@ export class ConversationService {
     }
 
     return { hiddenCount: result.count, hiddenAt: now.toISOString() };
+  }
+
+  private async assertParticipant(conversationId: string, userId: string) {
+    const participant = await prisma.participant.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+    if (!participant) throw new AppError(403, 'Not a participant of this conversation');
+    return participant;
+  }
+
+  async getSharedMediaSummary(conversationId: string, userId: string) {
+    const participant = await this.assertParticipant(conversationId, userId);
+    const clearedAt = participant.clearedAt;
+
+    const rows = await prisma.$queryRaw<
+      Array<{ images: bigint; videos: bigint; documents: bigint; links: bigint }>
+    >`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE m.attachment IS NOT NULL AND (m.attachment->>'kind') = 'image'
+        ) AS images,
+        COUNT(*) FILTER (
+          WHERE m.attachment IS NOT NULL AND (m.attachment->>'kind') = 'video'
+        ) AS videos,
+        COUNT(*) FILTER (
+          WHERE m.attachment IS NOT NULL AND (m.attachment->>'kind') = 'document'
+        ) AS documents,
+        COUNT(*) FILTER (
+          WHERE m.content ~* '(https?://|www\\.)'
+        ) AS links
+      FROM messages m
+      WHERE m.conversation_id = ${conversationId}
+        AND m.deleted_for_all = false
+        AND NOT (${userId} = ANY (m.deleted_for))
+        AND (${clearedAt}::timestamptz IS NULL OR m.created_at > ${clearedAt})
+    `;
+
+    const row = rows[0];
+    return {
+      images: Number(row?.images || 0),
+      videos: Number(row?.videos || 0),
+      documents: Number(row?.documents || 0),
+      links: Number(row?.links || 0),
+    };
+  }
+
+  async listSharedMedia(
+    conversationId: string,
+    userId: string,
+    options: {
+      type: 'image' | 'video' | 'document' | 'link';
+      cursor?: string;
+      limit?: number;
+    }
+  ) {
+    const participant = await this.assertParticipant(conversationId, userId);
+    const clearedAt = participant.clearedAt;
+    const limit = Math.min(Math.max(options.limit || 40, 1), 80);
+    const cursorDate = options.cursor ? new Date(options.cursor) : null;
+
+    if (options.type === 'link') {
+      const rows = await prisma.$queryRaw<
+        Array<{
+          messageId: string;
+          content: string;
+          createdAt: Date;
+        }>
+      >`
+        SELECT
+          m.id AS "messageId",
+          m.content AS content,
+          m.created_at AS "createdAt"
+        FROM messages m
+        WHERE m.conversation_id = ${conversationId}
+          AND m.deleted_for_all = false
+          AND NOT (${userId} = ANY (m.deleted_for))
+          AND m.content ~* '(https?://|www\\.)'
+          AND (${clearedAt}::timestamptz IS NULL OR m.created_at > ${clearedAt})
+          AND (${cursorDate}::timestamptz IS NULL OR m.created_at < ${cursorDate})
+        ORDER BY m.created_at DESC
+        LIMIT ${limit + 1}
+      `;
+
+      const page = rows.slice(0, limit);
+      const hasMore = rows.length > limit;
+      const nextCursor = hasMore ? page[page.length - 1]?.createdAt?.toISOString() : null;
+
+      return {
+        type: 'link' as const,
+        items: page.map((r) => ({
+          messageId: r.messageId,
+          content: r.content,
+          createdAt: r.createdAt.toISOString(),
+        })),
+        nextCursor,
+        hasMore,
+      };
+    }
+
+    const kind = options.type;
+    const rows = await prisma.$queryRaw<
+      Array<{
+        messageId: string;
+        content: string;
+        createdAt: Date;
+        attachment: unknown;
+      }>
+    >`
+      SELECT
+        m.id AS "messageId",
+        m.content AS content,
+        m.created_at AS "createdAt",
+        m.attachment AS attachment
+      FROM messages m
+      WHERE m.conversation_id = ${conversationId}
+        AND m.attachment IS NOT NULL
+        AND (m.attachment->>'kind') = ${kind}
+        AND m.deleted_for_all = false
+        AND NOT (${userId} = ANY (m.deleted_for))
+        AND (${clearedAt}::timestamptz IS NULL OR m.created_at > ${clearedAt})
+        AND (${cursorDate}::timestamptz IS NULL OR m.created_at < ${cursorDate})
+      ORDER BY m.created_at DESC
+      LIMIT ${limit + 1}
+    `;
+
+    const page = rows.slice(0, limit);
+    const hasMore = rows.length > limit;
+    const nextCursor = hasMore ? page[page.length - 1]?.createdAt?.toISOString() : null;
+
+    return {
+      type: kind,
+      items: page.map((r) => ({
+        messageId: r.messageId,
+        content: r.content,
+        createdAt: r.createdAt.toISOString(),
+        attachment: r.attachment,
+      })),
+      nextCursor,
+      hasMore,
+    };
   }
 }
 

@@ -11,6 +11,7 @@ import { ALL_AVATARS } from '../../config';
 import { normalizeMobileNumber } from './user.validation';
 import { friendService } from '../friends/friend.service';
 import { registerPushToken, unregisterPushToken } from '../../services/push.service';
+import { uploadService } from '../uploads/upload.service';
 
 /** Full profile — owner only (includes private fields) */
 const ownerProfileSelect = {
@@ -25,6 +26,8 @@ const ownerProfileSelect = {
   course: true,
   bio: true,
   avatarId: true,
+  avatarUrl: true,
+  avatarVersion: true,
   status: true,
   statusMessage: true,
   lastSeen: true,
@@ -42,11 +45,14 @@ const publicProfileSelect = {
   course: true,
   bio: true,
   avatarId: true,
+  avatarUrl: true,
+  avatarVersion: true,
   status: true,
   statusMessage: true,
   lastSeen: true,
   isVerified: true,
   isSystemAccount: true,
+  updatedAt: true,
 } as const;
 
 export class UserService {
@@ -120,6 +126,8 @@ export class UserService {
       university?: string;
       course?: string;
       avatarId?: string;
+      avatarUrl?: string | null;
+      avatarVersion?: number;
       statusMessage?: string;
       mobileNumber?: string | null;
     } = {};
@@ -129,7 +137,14 @@ export class UserService {
     if (data.bio !== undefined) updateData.bio = data.bio;
     if (data.university !== undefined) updateData.university = data.university;
     if (data.course !== undefined) updateData.course = data.course;
-    if (data.avatarId !== undefined) updateData.avatarId = data.avatarId;
+    if (data.avatarId !== undefined) {
+      updateData.avatarId = data.avatarId;
+      // Selecting a default AO avatar clears any custom photo
+      if (current.avatarUrl) {
+        updateData.avatarUrl = null;
+        updateData.avatarVersion = (current.avatarVersion || 0) + 1;
+      }
+    }
     if (data.statusMessage !== undefined) updateData.statusMessage = data.statusMessage;
     if (data.username !== undefined) updateData.username = data.username.toLowerCase();
     if (mobileNumber !== undefined) updateData.mobileNumber = mobileNumber;
@@ -137,6 +152,58 @@ export class UserService {
     const user = await prisma.user.update({
       where: { id: userId },
       data: updateData,
+      select: ownerProfileSelect,
+    });
+
+    await cacheDel(CacheKeys.user(userId), `${CacheKeys.user(userId)}:owner`);
+    return user;
+  }
+
+  async setProfileAvatar(
+    userId: string,
+    file: { buffer: Buffer; originalName: string; mimeType: string }
+  ) {
+    const current = await prisma.user.findUnique({ where: { id: userId } });
+    if (!current) throw new AppError(404, 'User not found');
+    if (current.isSystemAccount) throw new AppError(403, 'System accounts cannot be modified');
+
+    const saved = await uploadService.saveProfileAvatar({
+      uploaderId: userId,
+      buffer: file.buffer,
+      originalName: file.originalName,
+      mimeType: file.mimeType,
+    });
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        avatarUrl: saved.url,
+        avatarVersion: (current.avatarVersion || 0) + 1,
+      },
+      select: ownerProfileSelect,
+    });
+
+    await cacheDel(CacheKeys.user(userId), `${CacheKeys.user(userId)}:owner`);
+    return user;
+  }
+
+  async clearProfileAvatar(userId: string) {
+    const current = await prisma.user.findUnique({ where: { id: userId } });
+    if (!current) throw new AppError(404, 'User not found');
+    if (current.isSystemAccount) throw new AppError(403, 'System accounts cannot be modified');
+    if (!current.avatarUrl) {
+      return prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: ownerProfileSelect,
+      });
+    }
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        avatarUrl: null,
+        avatarVersion: (current.avatarVersion || 0) + 1,
+      },
       select: ownerProfileSelect,
     });
 

@@ -31,6 +31,8 @@ interface Friend {
   firstName: string;
   lastName: string;
   avatarId: string;
+  avatarUrl?: string | null;
+  avatarVersion?: number;
   status: string;
   university?: string;
 }
@@ -245,8 +247,19 @@ export default function FriendsScreen() {
     <TouchableOpacity
       style={[styles.item, { backgroundColor: colors.surface, borderColor: colors.border }]}
       onPress={() => handleStartChat(item.id)}
+      onLongPress={() =>
+        router.push({ pathname: '/friend/[id]', params: { id: item.id } } as any)
+      }
+      delayLongPress={350}
     >
-      <Avatar avatarId={item.avatarId} size={48} showOnline isOnline={item.status === 'ONLINE'} />
+      <Avatar
+        avatarId={item.avatarId}
+        imageUrl={item.avatarUrl}
+        imageVersion={item.avatarVersion}
+        size={48}
+        showOnline
+        isOnline={item.status === 'ONLINE'}
+      />
       <View style={styles.itemContent}>
         <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]}>
           {item.firstName} {item.lastName}
@@ -263,7 +276,12 @@ export default function FriendsScreen() {
 
   const renderPendingReceived = (item: FriendRequest) => (
     <View style={[styles.item, styles.pendingItem, { backgroundColor: colors.surface, borderColor: colors.primary + '30' }]}>
-      <Avatar avatarId={item.sender.avatarId} size={48} />
+      <Avatar
+        avatarId={item.sender.avatarId}
+        imageUrl={(item.sender as Friend).avatarUrl}
+        imageVersion={(item.sender as Friend).avatarVersion}
+        size={48}
+      />
       <View style={styles.itemContent}>
         <View style={styles.pendingRow}>
           <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]}>
@@ -304,7 +322,14 @@ export default function FriendsScreen() {
 
   const renderPendingSent = (item: SentRequest) => (
     <View style={[styles.item, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <Avatar avatarId={item.receiver.avatarId} size={48} showOnline isOnline={item.receiver.status === 'ONLINE'} />
+      <Avatar
+        avatarId={item.receiver.avatarId}
+        imageUrl={(item.receiver as Friend).avatarUrl}
+        imageVersion={(item.receiver as Friend).avatarVersion}
+        size={48}
+        showOnline
+        isOnline={item.receiver.status === 'ONLINE'}
+      />
       <View style={styles.itemContent}>
         <View style={styles.chatHeaderRow}>
           <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]} numberOfLines={1}>
@@ -342,7 +367,12 @@ export default function FriendsScreen() {
 
   const renderSearchResult = ({ item }: { item: SearchUser }) => (
     <View style={[styles.item, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <Avatar avatarId={item.avatarId} size={48} />
+      <Avatar
+        avatarId={item.avatarId}
+        imageUrl={item.avatarUrl}
+        imageVersion={item.avatarVersion}
+        size={48}
+      />
       <View style={styles.itemContent}>
         <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]}>
           {item.firstName} {item.lastName}
