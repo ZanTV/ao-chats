@@ -32,12 +32,15 @@ interface Props {
   canSubmit: boolean;
   submitMode?: 'send' | 'save';
   onEmojiPress: () => void;
+  onAttachPress?: () => void;
+  attachDisabled?: boolean;
   onSubmit: () => void;
   onFocus?: () => void;
   onContentHeightChange?: (height: number) => void;
   colors: ChatComposerFieldColors;
   fonts: { md: number };
   emojiAccessibilityLabel: string;
+  attachAccessibilityLabel?: string;
   sendAccessibilityLabel: string;
   inputAccessibilityLabel?: string;
   maxLength?: number;
@@ -52,12 +55,15 @@ export const ChatComposerField = forwardRef<TextInputType, Props>(function ChatC
     canSubmit,
     submitMode = 'send',
     onEmojiPress,
+    onAttachPress,
+    attachDisabled,
     onSubmit,
     onFocus,
     onContentHeightChange,
     colors,
     fonts,
     emojiAccessibilityLabel,
+    attachAccessibilityLabel,
     sendAccessibilityLabel,
     inputAccessibilityLabel,
     maxLength = 5000,
@@ -96,6 +102,24 @@ export const ChatComposerField = forwardRef<TextInputType, Props>(function ChatC
         },
       ]}
     >
+      {onAttachPress && submitMode === 'send' ? (
+        <TouchableOpacity
+          style={styles.control}
+          onPress={onAttachPress}
+          disabled={attachDisabled}
+          accessibilityLabel={attachAccessibilityLabel || 'Attach'}
+          accessibilityRole="button"
+          hitSlop={4}
+        >
+          <Ionicons
+            name="attach-outline"
+            size={ComposerLayout.iconSize}
+            color={attachDisabled ? colors.textTertiary : focused ? colors.primary : colors.textSecondary}
+            style={{ transform: [{ rotate: '-45deg' }] }}
+          />
+        </TouchableOpacity>
+      ) : null}
+
       <TouchableOpacity
         style={styles.control}
         onPress={onEmojiPress}

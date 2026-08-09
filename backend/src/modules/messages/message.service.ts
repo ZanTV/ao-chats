@@ -10,8 +10,18 @@ import {
 import { AppError } from '../../middleware/errorHandler';
 import { config } from '../../config';
 import { sanitizeInput } from '../../middleware/validation';
-import { MessageStatus } from '@prisma/client';
+import { MessageStatus, Prisma } from '@prisma/client';
 import { userService } from '../users/user.service';
+import {
+  isAllowedMime,
+  kindFromMime,
+  maxBytesForMime,
+  messageTypeFromKind,
+  sanitizeFileName,
+  type MessageAttachment,
+} from '../../utils/attachment';
+import { resolveUploadPath } from '../uploads/upload.service';
+import fs from 'fs';
 
 const replyToSelect = {
   id: true,
@@ -59,13 +69,72 @@ function messageVisibilityWhere(
 }
 
 export class MessageService {
+  private validateAttachmentForSender(
+    senderId: string,
+    raw: MessageAttachment | undefined,
+    type: 'TEXT' | 'IMAGE' | 'FILE',
+    options?: { allowExistingOwnedFile?: boolean }
+  ): MessageAttachment | null {
+    if (!raw) {
+      if (type === 'IMAGE' || type === 'FILE') {
+        throw new AppError(400, 'Attachment is required for media messages');
+      }
+      return null;
+    }
+
+    if (!options?.allowExistingOwnedFile && !raw.storageKey.startsWith(`${senderId}/`)) {
+      throw new AppError(403, "You don't have permission to upload this file.");
+    }
+
+    const mime = String(raw.mimeType || '').toLowerCase();
+    if (!isAllowedMime(mime)) {
+      throw new AppError(400, "This file type isn't supported.");
+    }
+
+    const kind = kindFromMime(mime);
+    const expectedType = messageTypeFromKind(kind);
+    if (type !== expectedType) {
+      throw new AppError(400, 'Message type does not match attachment');
+    }
+
+    if (!Number.isFinite(raw.fileSize) || raw.fileSize <= 0 || raw.fileSize > maxBytesForMime(mime)) {
+      throw new AppError(400, 'This file is too large to upload.');
+    }
+
+    const full = resolveUploadPath(raw.storageKey);
+    if (!fs.existsSync(full)) {
+      throw new AppError(400, 'Upload failed. Try again.');
+    }
+    const stat = fs.statSync(full);
+    if (stat.size !== raw.fileSize) {
+      throw new AppError(400, 'Upload failed. Try again.');
+    }
+
+    return {
+      id: raw.id,
+      kind,
+      mimeType: mime,
+      fileName: sanitizeFileName(raw.fileName),
+      fileSize: raw.fileSize,
+      storageKey: raw.storageKey,
+      url: raw.url,
+      width: raw.width,
+      height: raw.height,
+      duration: raw.duration,
+    };
+  }
+
   async sendMessage(
     conversationId: string,
     senderId: string,
     content: string,
     type: 'TEXT' | 'IMAGE' | 'FILE' = 'TEXT',
     replyToId?: string,
-    options?: { isForwarded?: boolean; forwardedFromId?: string }
+    options?: {
+      isForwarded?: boolean;
+      forwardedFromId?: string;
+      attachment?: MessageAttachment | null;
+    }
   ) {
     const participant = await prisma.participant.findUnique({
       where: { conversationId_userId: { conversationId, userId: senderId } },
@@ -90,6 +159,17 @@ export class MessageService {
       if (!replyMsg) throw new AppError(400, 'Reply message not found');
     }
 
+    const attachment = this.validateAttachmentForSender(
+      senderId,
+      options?.attachment ?? undefined,
+      type,
+      { allowExistingOwnedFile: Boolean(options?.isForwarded) }
+    );
+    const text = sanitizeInput(content || '');
+    if (!attachment && !text.trim()) {
+      throw new AppError(400, 'Message content is required');
+    }
+
     const recipient = await getRecipientStatus(conversationId, senderId);
     const initialStatus: MessageStatus =
       recipient && recipient.status !== 'ONLINE' ? 'WAITING' : 'SENT';
@@ -99,13 +179,16 @@ export class MessageService {
         data: {
           conversationId,
           senderId,
-          content: sanitizeInput(content),
+          content: text,
           type,
           replyToId,
           status: initialStatus,
           waitingAt: initialStatus === 'WAITING' ? new Date() : null,
           isForwarded: options?.isForwarded ?? false,
           forwardedFromId: options?.forwardedFromId,
+          attachment: attachment
+            ? (attachment as unknown as Prisma.InputJsonValue)
+            : Prisma.JsonNull,
         },
         include: {
           sender: {
@@ -420,13 +503,22 @@ export class MessageService {
     });
     if (!participant) throw new AppError(403, 'Not a participant in target conversation');
 
+    const attachment =
+      original.attachment && typeof original.attachment === 'object'
+        ? (original.attachment as unknown as MessageAttachment)
+        : null;
+
     return this.sendMessage(
       targetConversationId,
       userId,
       original.content,
-      original.type as 'TEXT',
+      (original.type as 'TEXT' | 'IMAGE' | 'FILE') || 'TEXT',
       undefined,
-      { isForwarded: true, forwardedFromId: messageId }
+      {
+        isForwarded: true,
+        forwardedFromId: messageId,
+        attachment,
+      }
     );
   }
 

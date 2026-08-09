@@ -43,7 +43,29 @@ module.exports = ({ config }) => ({
       },
     ],
   },
-  plugins: ['expo-router', 'expo-secure-store', 'expo-asset', 'expo-sqlite', 'expo-notifications', 'expo-audio'],
+  plugins: [
+    'expo-router',
+    'expo-secure-store',
+    'expo-asset',
+    'expo-sqlite',
+    'expo-notifications',
+    'expo-audio',
+    [
+      'expo-image-picker',
+      {
+        photosPermission: 'Allow AO Chats to access your photos so you can share images and videos.',
+        cameraPermission: false,
+      },
+    ],
+    [
+      'expo-media-library',
+      {
+        photosPermission: 'Allow AO Chats to show recent photos for quick sharing.',
+        savePhotosPermission: false,
+        isAccessMediaLocationEnabled: false,
+      },
+    ],
+  ],
   experiments: {
     typedRoutes: true,
   },

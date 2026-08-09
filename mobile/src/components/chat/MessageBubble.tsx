@@ -17,6 +17,10 @@ import {
   MESSAGE_HIGHLIGHT_TO,
 } from '../../utils/reanimatedColors';
 import { BorderRadius, Spacing, MessageBubbleLayout } from '../../theme';
+import { MediaMessageBody } from './MediaMessageBody';
+import { LinkedMessageText } from './LinkedMessageText';
+import type { DetectedEntity } from '../../links/detect';
+import { isMessageAttachment } from '../../attachments/types';
 
 interface ThemeColors {
   bubbleSent: string;
@@ -57,6 +61,14 @@ interface Props {
   seeMoreLabel?: string;
   seeLessLabel?: string;
   editedLabel?: string;
+  onEntityPress?: (entity: DetectedEntity) => void;
+  mediaLabels?: {
+    download: string;
+    downloading: string;
+    downloadFailed: string;
+    retry: string;
+    open: string;
+  };
 }
 
 export function MessageBubble({
@@ -76,12 +88,16 @@ export function MessageBubble({
   seeMoreLabel = 'See more',
   seeLessLabel = 'See less',
   editedLabel = 'edited',
+  onEntityPress,
+  mediaLabels,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const highlight = useSharedValue(0);
 
   const displayContent = message.content;
-  const isLongMessage = message.content.length > 220;
+  const attachment = isMessageAttachment(message.attachment) ? message.attachment : null;
+  const isMedia = Boolean(attachment) && (message.type === 'IMAGE' || message.type === 'FILE');
+  const isLongMessage = !isMedia && message.content.length > 220;
   const isCollapsed = isLongMessage && !expanded;
 
   useEffect(() => {
@@ -222,12 +238,54 @@ export function MessageBubble({
           <Ionicons name="pin" size={12} color={textColor + '99'} style={styles.pinIcon} />
         )}
 
-        <Text
-          style={[styles.messageText, { color: textColor, fontSize: fonts.md }]}
-          numberOfLines={isCollapsed ? 6 : undefined}
-        >
-          {displayContent}
-        </Text>
+        {isMedia && attachment ? (
+          <MediaMessageBody
+            attachment={attachment}
+            caption={displayContent}
+            isOwn={isOwn}
+            textColor={textColor}
+            mutedColor={isOwn ? 'rgba(255,255,255,0.72)' : colors.textTertiary}
+            surfaceColor={colors.surfaceSecondary || colors.surface}
+            primaryColor={isOwn ? '#FFFFFF' : colors.primary}
+            fonts={fonts}
+            labels={mediaLabels || {
+              download: 'Download',
+              downloading: 'Downloading',
+              downloadFailed: 'Download failed. Try again.',
+              retry: 'Retry',
+              open: 'Open',
+            }}
+            renderCaption={(caption) =>
+              onEntityPress ? (
+                <LinkedMessageText
+                  text={caption}
+                  color={textColor}
+                  linkColor={isOwn ? '#E0F2FE' : colors.primary}
+                  fontSize={fonts.md}
+                  onEntityPress={onEntityPress}
+                />
+              ) : (
+                <Text style={[styles.messageText, { color: textColor, fontSize: fonts.md }]}>{caption}</Text>
+              )
+            }
+          />
+        ) : onEntityPress ? (
+          <LinkedMessageText
+            text={displayContent}
+            color={textColor}
+            linkColor={isOwn ? '#E0F2FE' : colors.primary}
+            fontSize={fonts.md}
+            numberOfLines={isCollapsed ? 6 : undefined}
+            onEntityPress={onEntityPress}
+          />
+        ) : (
+          <Text
+            style={[styles.messageText, { color: textColor, fontSize: fonts.md }]}
+            numberOfLines={isCollapsed ? 6 : undefined}
+          >
+            {displayContent}
+          </Text>
+        )}
 
         {isLongMessage && (
           <Pressable

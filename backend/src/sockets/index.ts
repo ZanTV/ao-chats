@@ -9,6 +9,7 @@ import { messageService } from '../modules/messages/message.service';
 import { conversationService } from '../modules/conversations/conversation.service';
 import { emitConversationUpdated } from './conversation.events';
 import { createAndDispatchMessage, deliverPendingMessages, emitMessageStatus } from './message.dispatch';
+import { messageTypeFromKind } from '../utils/attachment';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -193,19 +194,24 @@ export function setupSocketIO(httpServer: HttpServer): Server {
     socket.on('message:send', async (data: {
       conversationId: string;
       content: string;
-      type?: 'TEXT';
+      type?: 'TEXT' | 'IMAGE' | 'FILE';
       replyToId?: string;
       tempId?: string;
+      attachment?: import('../utils/attachment').MessageAttachment;
     }) => {
       try {
         await createAndDispatchMessage(
           io,
           data.conversationId,
           userId,
-          data.content,
-          data.type || 'TEXT',
+          data.content ?? '',
+          data.type ||
+            (data.attachment?.kind
+              ? messageTypeFromKind(data.attachment.kind)
+              : 'TEXT'),
           data.replyToId,
-          data.tempId
+          data.tempId,
+          data.attachment
         );
       } catch (err) {
         socket.emit('message:error', {

@@ -197,6 +197,8 @@ model Message {
   forwardedFromId String?      @map("forwarded_from_id")
   isEdited       Boolean       @default(false) @map("is_edited")
   editedAt       DateTime?     @map("edited_at")
+  /// Attachment metadata (file stored in object/local storage — not in Postgres).
+  attachment     Json?
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 

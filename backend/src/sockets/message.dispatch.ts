@@ -69,14 +69,16 @@ export async function createAndDispatchMessage(
   content: string,
   type: 'TEXT' | 'IMAGE' | 'FILE' = 'TEXT',
   replyToId?: string,
-  tempId?: string
+  tempId?: string,
+  attachment?: import('../utils/attachment').MessageAttachment | null
 ) {
   const message = await messageService.sendMessage(
     conversationId,
     senderId,
     content,
     type,
-    replyToId
+    replyToId,
+    { attachment: attachment ?? null }
   );
 
   if (io) {
@@ -106,12 +108,20 @@ export async function createAndDispatchMessage(
         );
 
         if (!recipientInChat) {
+          const preview =
+            type === 'IMAGE'
+              ? '📷 Photo'
+              : type === 'FILE'
+                ? attachment?.fileName
+                  ? `📄 ${attachment.fileName}`
+                  : '📄 File'
+                : content;
           await notificationService.notifyNewMessage(
             otherParticipant.userId,
             sender.user.firstName,
             senderId,
             conversationId,
-            content
+            preview
           );
           io.to(`user:${otherParticipant.userId}`).emit('notification:new', {
             type: 'NEW_MESSAGE',

@@ -28,6 +28,8 @@ export interface ChatMessage {
   failed?: boolean;
   isEdited?: boolean;
   editedAt?: string;
+  attachment?: import('../attachments/types').MessageAttachment | null;
+  uploadProgress?: number;
 }
 
 /** Remove duplicate messages by id — keeps the last occurrence */
@@ -43,6 +45,8 @@ function isSameMessage(a: ChatMessage, b: ChatMessage): boolean {
   return (
     a.senderId === b.senderId &&
     a.content === b.content &&
+    (a.attachment?.id || null) === (b.attachment?.id || null) &&
+    a.type === b.type &&
     Math.abs(new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) < 15000
   );
 }
@@ -135,6 +139,7 @@ export function upsertMessage(
     if (
       m.senderId === merged.senderId &&
       m.content === merged.content &&
+      (m.attachment?.id || null) === (merged.attachment?.id || null) &&
       Math.abs(new Date(m.createdAt).getTime() - new Date(merged.createdAt).getTime()) < 8000
     ) {
       return m.pending || m.id.startsWith('temp-');
@@ -148,7 +153,8 @@ export function upsertMessage(
         m.pending &&
         m.id.startsWith('temp-') &&
         m.senderId === merged.senderId &&
-        m.content === merged.content
+        m.content === merged.content &&
+        (m.attachment?.id || null) === (merged.attachment?.id || null)
       )
   );
 
@@ -163,6 +169,7 @@ export function upsertMessage(
 
 export function normalizeMessage(raw: Record<string, unknown>): ChatMessage {
   const stars = raw.stars as Array<{ id: string }> | undefined;
+  const attachment = raw.attachment;
   return {
     id: String(raw.id),
     content: String(raw.content ?? ''),
@@ -185,5 +192,9 @@ export function normalizeMessage(raw: Record<string, unknown>): ChatMessage {
     failed: Boolean(raw.failed),
     isEdited: Boolean(raw.isEdited),
     editedAt: raw.editedAt ? String(raw.editedAt) : undefined,
+    attachment:
+      attachment && typeof attachment === 'object'
+        ? (attachment as ChatMessage['attachment'])
+        : undefined,
   };
 }

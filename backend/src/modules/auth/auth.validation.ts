@@ -114,12 +114,45 @@ export const searchUsersSchema = z.object({
   limit: z.coerce.number().min(1).max(50).optional(),
 });
 
-export const sendMessageSchema = z.object({
-  content: z.string().min(1).max(5000),
-  type: z.enum(['TEXT', 'IMAGE', 'FILE']).optional(),
-  replyToId: z.string().uuid().optional(),
-  tempId: z.string().max(64).optional(),
+const attachmentSchema = z.object({
+  id: z.string().uuid(),
+  kind: z.enum(['image', 'video', 'document']),
+  mimeType: z.string().min(3).max(120),
+  fileName: z.string().min(1).max(180),
+  fileSize: z.number().int().positive().max(50 * 1024 * 1024),
+  storageKey: z.string().min(1).max(400),
+  url: z.string().min(1).max(1000),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  duration: z.number().nonnegative().optional(),
 });
+
+export const sendMessageSchema = z
+  .object({
+    content: z.string().max(5000).optional().default(''),
+    type: z.enum(['TEXT', 'IMAGE', 'FILE']).optional(),
+    replyToId: z.string().uuid().optional(),
+    tempId: z.string().max(64).optional(),
+    attachment: attachmentSchema.optional(),
+  })
+  .superRefine((data, ctx) => {
+    const hasAttachment = Boolean(data.attachment);
+    const text = (data.content ?? '').trim();
+    if (!hasAttachment && !text) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Message content is required',
+        path: ['content'],
+      });
+    }
+    if (hasAttachment && data.type === 'TEXT') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Attachment messages must use IMAGE or FILE type',
+        path: ['type'],
+      });
+    }
+  });
 
 export const editMessageSchema = z.object({
   content: z.string().min(1).max(5000),

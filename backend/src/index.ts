@@ -22,6 +22,7 @@ import friendRoutes from './modules/friends/friend.routes';
 import conversationRoutes from './modules/conversations/conversation.routes';
 import messageRoutes from './modules/messages/message.routes';
 import notificationRoutes from './modules/notifications/notification.routes';
+import uploadRoutes from './modules/uploads/upload.routes';
 
 const app = express();
 const httpServer = createServer(app);
@@ -107,6 +108,7 @@ app.use('/api/friends', friendRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/uploads', uploadRoutes);
 
 app.use(errorHandler);
 

@@ -1,3 +1,5 @@
+# Local uploaded files (runtime storage — not source)
+/uploads/
 node_modules/
 dist/
 .env

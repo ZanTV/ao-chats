@@ -339,10 +339,25 @@ class ApiClient {
     this.request<{ messages: Record<string, unknown>[] }>(
       `/messages/${conversationId}/around/${messageId}?limit=${limit}`
     );
-  sendMessage = (conversationId: string, content: string, replyToId?: string, tempId?: string) =>
+  sendMessage = (
+    conversationId: string,
+    content: string,
+    replyToId?: string,
+    tempId?: string,
+    options?: {
+      type?: 'TEXT' | 'IMAGE' | 'FILE';
+      attachment?: import('../attachments/types').MessageAttachment;
+    }
+  ) =>
     this.request<{ message: Record<string, unknown> }>(`/messages/${conversationId}`, {
       method: 'POST',
-      body: JSON.stringify({ content, replyToId, tempId }),
+      body: JSON.stringify({
+        content,
+        replyToId,
+        tempId,
+        type: options?.type,
+        attachment: options?.attachment,
+      }),
     }).then((res) => res.message);
   searchMessages = (conversationId: string, q: string) =>
     this.request(`/messages/${conversationId}/search?q=${encodeURIComponent(q)}`);

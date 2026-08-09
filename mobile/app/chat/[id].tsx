@@ -23,8 +23,16 @@ import { SwipeableMessageRow } from '../../src/components/chat/SwipeableMessageR
 import { MessageActionBar, MessageAction } from '../../src/components/chat/MessageActionBar';
 import { ReplyPreviewBar } from '../../src/components/chat/ReplyPreviewBar';
 import { ChatComposerField } from '../../src/components/chat/ChatComposerField';
+import { AttachmentSheet } from '../../src/components/chat/AttachmentSheet';
+import { AttachmentPreviewBar } from '../../src/components/chat/AttachmentPreviewBar';
+import { DetectedContactActionSheet } from '../../src/components/chat/DetectedContactActionSheet';
 import { ReactionPicker } from '../../src/components/chat/ReactionPicker';
 import { AOEmojiPicker } from '../../src/components/emoji/AOEmojiPicker';
+import type { PendingAttachment } from '../../src/attachments/pending';
+import { messageTypeFromKindClient } from '../../src/attachments/pending';
+import { uploadAttachment } from '../../src/attachments/upload';
+import { seedLocalAttachment } from '../../src/attachments/storage';
+import type { DetectedEntity } from '../../src/links/detect';
 import { ForwardSheet } from '../../src/components/chat/ForwardSheet';
 import { MessageInfoSheet } from '../../src/components/chat/MessageInfoSheet';
 import { PinnedBar } from '../../src/components/chat/PinnedBar';
@@ -135,6 +143,14 @@ export default function ChatScreen() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteForEveryone, setDeleteForEveryone] = useState(false);
   const [showDeleteMenu, setShowDeleteMenu] = useState(false);
+  const [showAttachmentSheet, setShowAttachmentSheet] = useState(false);
+  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadFailed, setUploadFailed] = useState(false);
+  const [activeEntity, setActiveEntity] = useState<DetectedEntity | null>(null);
+  const [copyToast, setCopyToast] = useState<string | null>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const [unpinningId, setUnpinningId] = useState<string | null>(null);
 
   const lastMarkReadAtRef = useRef(0);
@@ -724,10 +740,106 @@ export default function ChatScreen() {
   }, [conversationId, user?.id, updateMessages, loadConversationMeta, loadMessages, t.common.error, scrollToLatest, applyMessages, markConversationReadNow]);
 
   const handleSend = async () => {
-    if (!inputText.trim() || !conversationId || !user) return;
+    if (!conversationId || !user) return;
+    if (uploading) return;
     const content = inputText.trim();
+    const pending = pendingAttachment;
+    if (!content && !pending) return;
+
     const replyToId = replyTo?.id;
     const tempId = `temp-${Date.now()}`;
+
+    if (pending) {
+      setUploading(true);
+      setUploadFailed(false);
+      setUploadPercent(0);
+      const controller = new AbortController();
+      uploadAbortRef.current = controller;
+      try {
+        const uploaded = await uploadAttachment(
+          pending,
+          (p) => setUploadPercent(p.percent),
+          controller.signal
+        );
+        await seedLocalAttachment({
+          attachmentId: uploaded.id,
+          storageKey: uploaded.storageKey,
+          localUri: pending.localUri,
+          fileSize: uploaded.fileSize,
+          downloadedAt: new Date().toISOString(),
+          mimeType: uploaded.mimeType,
+          fileName: uploaded.fileName,
+        });
+
+        const msgType = messageTypeFromKindClient(uploaded.kind);
+        const optimistic: Message = {
+          id: tempId,
+          content,
+          senderId: user.id,
+          type: msgType,
+          replyToId,
+          replyTo: replyTo
+            ? {
+                id: replyTo.id,
+                content: replyTo.content,
+                type: replyTo.type,
+                deletedForAll: replyTo.deletedForAll,
+                isDeleted: replyTo.isDeleted,
+                senderId: replyTo.senderId,
+                sender: {
+                  firstName:
+                    replyTo.senderId === user.id
+                      ? t.chat.you
+                      : otherUser?.firstName || 'User',
+                },
+              }
+            : undefined,
+          reactions: [],
+          createdAt: new Date().toISOString(),
+          pending: true,
+          status: recipientOnline ? 'SENT' : 'WAITING',
+          waitingAt: recipientOnline ? undefined : new Date().toISOString(),
+          attachment: uploaded,
+        };
+
+        stickToBottomRef.current = true;
+        updateMessages((prev) => [...prev, optimistic]);
+        playOutgoingChatFeedback().catch(() => {});
+        setInputText('');
+        setPendingAttachment(null);
+        setUploadPercent(null);
+        setUploading(false);
+        if (conversationId) {
+          useChatComposerStore.getState().clearDraft(conversationId);
+        }
+        setReplyTo(null);
+        socketService.stopTyping(conversationId);
+        scrollToLatest(true);
+
+        const saved = normalizeMessage(
+          (await api.sendMessage(conversationId, content, replyToId, tempId, {
+            type: msgType,
+            attachment: uploaded,
+          })) as Record<string, unknown>
+        );
+        updateMessages((prev) => upsertMessage(prev, saved, tempId));
+      } catch (err) {
+        setUploading(false);
+        if (err instanceof ApiError && err.code === 'CANCELLED') {
+          setUploadPercent(null);
+          return;
+        }
+        setUploadFailed(true);
+        Alert.alert(
+          t.common.error,
+          err instanceof ApiError ? err.message : t.chat.uploadFailed
+        );
+      } finally {
+        uploadAbortRef.current = null;
+      }
+      return;
+    }
+
     const optimistic: Message = {
       id: tempId,
       content,
@@ -1209,6 +1321,14 @@ export default function ChatScreen() {
           onSwipeReply={() => handleSwipeReply(message)}
           onReplyPress={scrollToMessage}
           onReactionPress={(emoji) => handleReactionChipPress(message, emoji)}
+          onEntityPress={(entity) => setActiveEntity(entity)}
+          mediaLabels={{
+            download: t.chat.download,
+            downloading: t.chat.downloading,
+            downloadFailed: t.chat.downloadFailed,
+            retry: t.chat.retry,
+            open: t.chat.openFile,
+          }}
           deletedLabel={t.chat.deletedMessage}
           compactBottom={compactBottom}
           seeMoreLabel={t.chat.seeMore}
@@ -1419,15 +1539,67 @@ export default function ChatScreen() {
           />
         )}
 
+        {pendingAttachment && !editingMessage && (
+          <AttachmentPreviewBar
+            file={pendingAttachment}
+            uploadPercent={uploadPercent}
+            uploading={uploading}
+            failed={uploadFailed}
+            onClear={() => {
+              if (uploading) return;
+              setPendingAttachment(null);
+              setUploadFailed(false);
+              setUploadPercent(null);
+            }}
+            onCancelUpload={() => {
+              uploadAbortRef.current?.abort();
+              setUploading(false);
+              setUploadPercent(null);
+            }}
+            onRetry={() => {
+              setUploadFailed(false);
+              handleSend();
+            }}
+            colors={colors}
+            fonts={fonts}
+            labels={{
+              uploading: t.chat.uploading,
+              failed: t.chat.uploadFailed,
+              retry: t.chat.retry,
+              cancel: t.common.cancel,
+            }}
+          />
+        )}
+
         <View style={styles.inputBar}>
           <ChatComposerField
             ref={inputRef}
             value={editingMessage ? editText : inputText}
             onChangeText={editingMessage ? setEditText : handleTyping}
-            placeholder={editingMessage ? t.chat.editMessage : t.chat.typeMessage}
+            placeholder={
+              editingMessage
+                ? t.chat.editMessage
+                : pendingAttachment
+                  ? t.chat.addCaption
+                  : t.chat.typeMessage
+            }
             emojiOpen={showComposerEmoji}
-            canSubmit={editingMessage ? !!editText.trim() : !!inputText.trim()}
+            canSubmit={
+              editingMessage
+                ? !!editText.trim()
+                : !!inputText.trim() || !!pendingAttachment
+            }
             submitMode={editingMessage ? 'save' : 'send'}
+            onAttachPress={
+              editingMessage
+                ? undefined
+                : () => {
+                    Keyboard.dismiss();
+                    setShowComposerEmoji(false);
+                    setShowAttachmentSheet(true);
+                  }
+            }
+            attachDisabled={uploading}
             onEmojiPress={() => {
               if (showComposerEmoji) {
                 setShowComposerEmoji(false);
@@ -1452,6 +1624,7 @@ export default function ChatScreen() {
             colors={colors}
             fonts={fonts}
             emojiAccessibilityLabel={t.chat.searchEmoji}
+            attachAccessibilityLabel={t.chat.attach}
             sendAccessibilityLabel={editingMessage ? t.chat.saveEdit : t.chat.send}
             inputAccessibilityLabel={editingMessage ? t.chat.editMessage : t.chat.typeMessage}
           />
@@ -1518,6 +1691,58 @@ export default function ChatScreen() {
         colors={colors}
         fonts={fonts}
       />
+
+      <AttachmentSheet
+        visible={showAttachmentSheet}
+        onClose={() => setShowAttachmentSheet(false)}
+        onSelect={(file) => {
+          setPendingAttachment(file);
+          setUploadFailed(false);
+          setUploadPercent(null);
+          requestAnimationFrame(() => inputRef.current?.focus());
+        }}
+        onError={(message) => Alert.alert(t.common.error, message)}
+        colors={colors}
+        fonts={fonts}
+        labels={{
+          title: t.chat.attachmentTitle,
+          gallery: t.chat.gallery,
+          document: t.chat.document,
+          link: t.chat.linkOther,
+          recent: t.chat.recentMedia,
+          cancel: t.common.cancel,
+        }}
+      />
+
+      <DetectedContactActionSheet
+        visible={!!activeEntity}
+        entity={activeEntity}
+        onClose={() => setActiveEntity(null)}
+        labels={{
+          open: t.chat.openLink,
+          openEmail: t.chat.openEmail,
+          openLocation: t.chat.openLocation,
+          call: t.chat.call,
+          copy: t.chat.copy,
+          cancel: t.common.cancel,
+          copiedLink: t.chat.linkCopied,
+          copiedEmail: t.chat.emailCopied,
+          copiedPhone: t.chat.phoneCopied,
+          copiedLocation: t.chat.locationCopied,
+        }}
+        colors={colors}
+        fonts={fonts}
+        onCopied={(message) => {
+          setCopyToast(message);
+          setTimeout(() => setCopyToast(null), 1600);
+        }}
+      />
+
+      {copyToast ? (
+        <View style={styles.copyToast} pointerEvents="none">
+          <Text style={styles.copyToastText}>{copyToast}</Text>
+        </View>
+      ) : null}
 
       <MessageInfoSheet
         visible={!!infoMessage}
@@ -1652,5 +1877,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  copyToast: {
+    position: 'absolute',
+    bottom: 120,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(15,23,42,0.92)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  copyToastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

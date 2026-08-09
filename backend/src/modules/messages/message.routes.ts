@@ -13,8 +13,18 @@ import { validateBody } from '../../middleware/validation';
 import { authenticate, AuthRequest } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/errorHandler';
 import { paramId } from '../../utils/params';
+import { messageTypeFromKind } from '../../utils/attachment';
 
 const router = Router();
+
+function resolveOutgoingType(body: {
+  type?: 'TEXT' | 'IMAGE' | 'FILE';
+  attachment?: { kind?: 'image' | 'video' | 'document' };
+}): 'TEXT' | 'IMAGE' | 'FILE' {
+  if (body.type) return body.type;
+  if (body.attachment?.kind) return messageTypeFromKind(body.attachment.kind);
+  return 'TEXT';
+}
 
 router.use(authenticate);
 
@@ -80,10 +90,11 @@ router.post(
       getIO(),
       conversationId,
       req.userId!,
-      req.body.content,
-      req.body.type,
+      req.body.content ?? '',
+      resolveOutgoingType(req.body),
       req.body.replyToId,
-      req.body.tempId
+      req.body.tempId,
+      req.body.attachment
     );
     res.status(201).json({ message });
   })

@@ -63,6 +63,14 @@ interface Props {
   onSwipeReply: () => void;
   onReplyPress?: (messageId: string) => void;
   onReactionPress?: (emoji: string) => void;
+  onEntityPress?: (entity: import('../../links/detect').DetectedEntity) => void;
+  mediaLabels?: {
+    download: string;
+    downloading: string;
+    downloadFailed: string;
+    retry: string;
+    open: string;
+  };
   currentUserId?: string;
   deletedLabel?: string;
   compactBottom?: boolean;
@@ -84,6 +92,8 @@ function BubbleContent(props: Props) {
       formatTime={props.formatTime}
       onReplyPress={props.onReplyPress}
       onReactionPress={props.onReactionPress}
+      onEntityPress={props.onEntityPress}
+      mediaLabels={props.mediaLabels}
       currentUserId={props.currentUserId}
       deletedLabel={props.deletedLabel}
       compactBottom={props.compactBottom}
