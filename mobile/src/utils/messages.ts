@@ -1,3 +1,5 @@
+import { coerceAttachment, mergeMessageFields } from './messageMerge';
+
 export interface ChatMessage {
   id: string;
   content: string;
@@ -59,12 +61,7 @@ export function mergeMessagesForLoad(...lists: ChatMessage[][]): ChatMessage[] {
     for (const msg of list) {
       const existing = byId.get(msg.id);
       if (existing) {
-        byId.set(msg.id, {
-          ...existing,
-          ...msg,
-          pending: msg.pending ?? existing.pending,
-          failed: msg.failed ?? existing.failed,
-        });
+        byId.set(msg.id, mergeMessageFields(existing, msg));
       } else {
         byId.set(msg.id, msg);
       }
@@ -91,6 +88,7 @@ export function mergeMessagesForLoad(...lists: ChatMessage[][]): ChatMessage[] {
 /**
  * Prefer the remote page as source of truth for its time window so locally
  * cached deleted messages cannot resurrect after delete-for-me / for-everyone.
+ * Local attachment metadata is preserved when the remote payload omits it.
  */
 export function mergeRemotePageAuthority(
   local: ChatMessage[],
@@ -113,12 +111,12 @@ export function mergeRemotePageAuthority(
 
   const keptLocal = local.filter((m) => {
     if (m.pending || m.id.startsWith('temp-') || m.failed) return true;
-    if (remoteIds.has(m.id)) return false; // remote copy wins via merge below
-    // Outside the fetched window — keep older pages from local cache
+    if (remoteIds.has(m.id)) return true; // merge with remote to preserve attachment fields
     return m.createdAt < oldestRemote || m.createdAt > newestRemote;
   });
 
-  return mergeMessagesForLoad(keptLocal, remotePage, pending);
+  // Remote last so server status/content/deletes win; mergeMessageFields keeps attachments.
+  return mergeMessagesForLoad(keptLocal, pending, remotePage);
 }
 
 /**
@@ -160,7 +158,7 @@ export function upsertMessage(
 
   const idx = next.findIndex((m) => m.id === merged.id);
   if (idx >= 0) {
-    next[idx] = { ...next[idx], ...merged };
+    next[idx] = mergeMessageFields(next[idx], merged);
     return dedupeMessages(next);
   }
 
@@ -169,7 +167,7 @@ export function upsertMessage(
 
 export function normalizeMessage(raw: Record<string, unknown>): ChatMessage {
   const stars = raw.stars as Array<{ id: string }> | undefined;
-  const attachment = raw.attachment;
+  const attachment = coerceAttachment(raw.attachment);
   return {
     id: String(raw.id),
     content: String(raw.content ?? ''),
@@ -192,9 +190,6 @@ export function normalizeMessage(raw: Record<string, unknown>): ChatMessage {
     failed: Boolean(raw.failed),
     isEdited: Boolean(raw.isEdited),
     editedAt: raw.editedAt ? String(raw.editedAt) : undefined,
-    attachment:
-      attachment && typeof attachment === 'object'
-        ? (attachment as ChatMessage['attachment'])
-        : undefined,
+    ...(attachment ? { attachment } : {}),
   };
 }

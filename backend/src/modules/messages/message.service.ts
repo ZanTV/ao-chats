@@ -17,6 +17,7 @@ import {
   kindFromMime,
   maxBytesForMime,
   messageTypeFromKind,
+  normalizeAttachmentPayload,
   sanitizeFileName,
   type MessageAttachment,
 } from '../../utils/attachment';
@@ -51,6 +52,14 @@ async function getRecipientStatus(conversationId: string, senderId: string) {
     include: { user: { select: { id: true, status: true } } },
   });
   return other?.user ?? null;
+}
+
+function withNormalizedAttachments<T extends { attachment?: unknown }>(messages: T[]): T[] {
+  return messages.map((message) => {
+    const normalized = normalizeAttachmentPayload(message.attachment, config.apiUrl);
+    if (!normalized) return message;
+    return { ...message, attachment: normalized };
+  });
 }
 
 function messageVisibilityWhere(
@@ -255,7 +264,7 @@ export class MessageService {
 
     const hasMore = messages.length > limit;
     const page = hasMore ? messages.slice(0, limit) : messages;
-    const result = page.reverse();
+    const result = withNormalizedAttachments(page.reverse());
     const nextCursor = hasMore && result.length > 0 ? result[0].createdAt.toISOString() : null;
 
     let cacheVersion: number | undefined;

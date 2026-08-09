@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import type { ChatMessage } from '../utils/messages';
+import { mergeMessageFields } from '../utils/messageMerge';
 
 const DB_NAME = 'ao_chats_messages.db';
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -81,13 +82,20 @@ export async function sqliteUpsertMessages(
   const db = await getDb();
   await db.withTransactionAsync(async () => {
     for (const msg of messages) {
+      const row = await db.getFirstAsync<{ payload: string }>(
+        `SELECT payload FROM messages WHERE conversation_id = ? AND id = ?`,
+        conversationId,
+        msg.id
+      );
+      const prev = row?.payload ? parseMessage(row.payload) : null;
+      const next = prev ? mergeMessageFields(prev, msg) : msg;
       await db.runAsync(
         `INSERT OR REPLACE INTO messages (id, conversation_id, payload, created_at)
          VALUES (?, ?, ?, ?)`,
-        msg.id,
+        next.id,
         conversationId,
-        serializeMessage(msg),
-        msg.createdAt
+        serializeMessage(next),
+        next.createdAt
       );
     }
   });

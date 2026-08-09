@@ -49,6 +49,10 @@ import { useTypingStore } from '../../src/stores/typingStore';
 import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
 import { cacheManager, MESSAGE_PAGE_SIZE, CacheDomain } from '../../src/cache';
+import {
+  getConversationScrollAnchor,
+  saveConversationScrollAnchor,
+} from '../../src/cache/scrollAnchors';
 import { dedupeSocketHandler } from '../../src/utils/socketDedup';
 import { ApiError } from '../../src/utils/validation';
 import {
@@ -188,6 +192,23 @@ export default function ChatScreen() {
   const isJumpingRef = useRef(false);
   const unreadSessionRef = useRef(false);
   const highlightDoneRef = useRef<string | null>(null);
+  const lastVisibleMessageIdRef = useRef<string | null>(null);
+  const restoreAttemptedRef = useRef(false);
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 40 }).current;
+  const onViewableItemsChanged = useRef(
+    ({
+      viewableItems,
+    }: {
+      viewableItems: Array<{ item: ListItem }>;
+    }) => {
+      const visibleMessages = viewableItems
+        .map((v) => v.item)
+        .filter((item): item is { kind: 'message'; message: Message } => item.kind === 'message');
+      if (visibleMessages.length === 0) return;
+      const mid = visibleMessages[Math.floor(visibleMessages.length / 2)];
+      lastVisibleMessageIdRef.current = mid.message.id;
+    }
+  ).current;
 
   const scrollToLatest = useCallback((animated = true) => {
     stickToBottomRef.current = true;
@@ -526,7 +547,7 @@ export default function ChatScreen() {
       if (!conversationId) return;
       unreadSessionRef.current = false;
       highlightDoneRef.current = null;
-      stickToBottomRef.current = true;
+      restoreAttemptedRef.current = false;
       setPendingBelowCount(0);
       setShowScrollDown(false);
       setActiveConversation(conversationId);
@@ -536,15 +557,34 @@ export default function ChatScreen() {
         const hasLocalMessages = (await cacheManager.getLocalMessages(conversationId)).length > 0;
         if (!hasLocalMessages) setLoading(true);
 
-        const [, draft] = await Promise.all([
+        const [, draft, savedAnchor] = await Promise.all([
           composerStore.loadAll(),
           Promise.resolve(composerStore.getDraft(conversationId)),
+          getConversationScrollAnchor(conversationId),
         ]);
         if (draft) setInputText(draft);
 
+        const shouldRestore =
+          !highlightParam &&
+          savedAnchor &&
+          !savedAnchor.nearBottom &&
+          Boolean(savedAnchor.messageId);
+
+        stickToBottomRef.current = !shouldRestore;
+
         await Promise.all([loadMessages(), loadConversationMeta()]);
 
-        if (!highlightParam) {
+        if (highlightParam) {
+          // jump handled by highlight effect
+        } else if (shouldRestore && savedAnchor?.messageId) {
+          restoreAttemptedRef.current = true;
+          setTimeout(() => {
+            scrollToMessage(savedAnchor.messageId).catch(() => {
+              stickToBottomRef.current = true;
+              scrollToLatest(false);
+            });
+          }, 80);
+        } else {
           scrollToLatest(false);
         }
         socketService.joinConversation(conversationId);
@@ -559,13 +599,30 @@ export default function ChatScreen() {
         if (conversationId) {
           useChatComposerStore.getState().setDraft(conversationId, inputTextRef.current);
           useChatComposerStore.getState().syncPendingFromMessages(conversationId, messagesRef.current);
+          const anchorId =
+            lastVisibleMessageIdRef.current ||
+            messagesRef.current[messagesRef.current.length - 1]?.id;
+          if (anchorId) {
+            void saveConversationScrollAnchor(conversationId, {
+              messageId: anchorId,
+              nearBottom: stickToBottomRef.current,
+            });
+          }
         }
         setActiveConversation(null);
         socketService.leaveConversation(conversationId);
         setShowUnreadDivider(false);
         unreadSessionRef.current = false;
       };
-    }, [conversationId, loadMessages, loadConversationMeta, markConversationReadNow, highlightParam, scrollToLatest])
+    }, [
+      conversationId,
+      loadMessages,
+      loadConversationMeta,
+      markConversationReadNow,
+      highlightParam,
+      scrollToLatest,
+      scrollToMessage,
+    ])
   );
 
   useEffect(() => {
@@ -1457,6 +1514,8 @@ export default function ChatScreen() {
             }
           }}
           scrollEventThrottle={16}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
           maintainVisibleContentPosition={
             Platform.OS === 'web' ? undefined : { minIndexForVisible: 0 }
           }

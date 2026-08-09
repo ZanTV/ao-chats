@@ -105,3 +105,18 @@ export function isMessageAttachmentLike(value: unknown): value is MessageAttachm
     typeof a.mimeType === 'string'
   );
 }
+
+/** Ensure attachment payloads always expose a usable authenticated URL. */
+export function normalizeAttachmentPayload(
+  raw: unknown,
+  apiBaseUrl: string
+): MessageAttachment | null {
+  if (!isMessageAttachmentLike(raw)) return null;
+  const a = raw as MessageAttachment;
+  const base = apiBaseUrl.replace(/\/$/, '');
+  const url =
+    typeof a.url === 'string' && a.url.length > 0
+      ? a.url
+      : `${base}/api/uploads/files/${encodeURIComponent(a.storageKey)}`;
+  return { ...a, url };
+}

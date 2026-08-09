@@ -272,6 +272,11 @@ export function MessageBubble({
               )
             }
           />
+        ) : message.type === 'IMAGE' || message.type === 'FILE' ? (
+          <Text style={[styles.messageText, { color: textColor + 'AA', fontSize: fonts.sm }]}>
+            {message.type === 'IMAGE' ? '📷 Photo' : '📄 Document'}
+            {displayContent?.trim() ? `\n${displayContent}` : ''}
+          </Text>
         ) : onEntityPress ? (
           <LinkedMessageText
             text={displayContent}
