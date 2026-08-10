@@ -65,6 +65,7 @@ import { playIncomingChatFeedback, playOutgoingChatFeedback } from '../../src/se
 import * as Haptics from 'expo-haptics';
 import { Spacing, BorderRadius } from '../../src/theme';
 import { useChatKeyboardInset } from '../../src/hooks/useChatKeyboardInset';
+import { useLiveAvatarPatches } from '../../src/profile/useLiveAvatarPatches';
 
 type Message = ChatMessage;
 
@@ -81,6 +82,8 @@ interface ConversationInfo {
       firstName: string;
       lastName: string;
       avatarId: string;
+      avatarUrl?: string | null;
+      avatarVersion?: number;
       status: string;
       isVerified?: boolean;
       isSystemAccount?: boolean;
@@ -203,6 +206,30 @@ export default function ChatScreen() {
 
   const otherUser = conversation?.participants.find((p) => p.userId !== user?.id)?.user;
   const recipientOnline = otherUser?.status === 'ONLINE';
+
+  const patchHeaderAvatar = useCallback(
+    (userId: string, avatarUrl: string | null, avatarVersion: number) => {
+      setConversation((prev) => {
+        if (!prev) return prev;
+        let changed = false;
+        const participants = prev.participants.map((p) => {
+          if (p.user.id !== userId) return p;
+          changed = true;
+          return {
+            ...p,
+            user: {
+              ...p.user,
+              avatarUrl,
+              avatarVersion,
+            },
+          };
+        });
+        return changed ? { ...prev, participants } : prev;
+      });
+    },
+    []
+  );
+  useLiveAvatarPatches(patchHeaderAvatar);
 
   const actionLabels = useMemo(() => {
     const selectedId = actionTarget?.id || Array.from(selectedIds)[0];
@@ -1389,6 +1416,7 @@ export default function ChatScreen() {
               accessibilityLabel={t.friendInfo.title}
             >
               <Avatar
+                userId={otherUser.id}
                 avatarId={otherUser.avatarId}
                 imageUrl={(otherUser as { avatarUrl?: string }).avatarUrl}
                 imageVersion={(otherUser as { avatarVersion?: number }).avatarVersion}

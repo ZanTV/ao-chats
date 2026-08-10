@@ -81,6 +81,7 @@ export function ProfilePhotoActions({
         style={style}
       >
         <Avatar
+          userId={userId}
           avatarId={avatarId || 'avatar-1'}
           imageUrl={imageUrl}
           imageVersion={imageVersion}

@@ -23,6 +23,8 @@ import {
   invalidatePublicProfile,
   type PublicProfileCache,
 } from '../../src/cache/profileCache';
+import { applyAvatarSyncUpdate } from '../../src/profile/avatarSyncStore';
+import { useLiveAvatarPatches } from '../../src/profile/useLiveAvatarPatches';
 import { Spacing, BorderRadius } from '../../src/theme';
 import { formatLastSeen } from '../../src/utils/profile';
 
@@ -59,6 +61,11 @@ export default function FriendInfoScreen() {
       const remote = (await api.getUser(userId)) as PublicProfileCache;
       setProfile(remote);
       setCachedPublicProfile(remote);
+      applyAvatarSyncUpdate({
+        userId,
+        avatarUrl: remote.avatarUrl ?? null,
+        avatarVersion: remote.avatarVersion ?? 0,
+      });
       setFromCache(false);
     } catch {
       const local = getCachedPublicProfile(userId);
@@ -104,13 +111,45 @@ export default function FriendInfoScreen() {
 
   useEffect(() => {
     return socketService.on('profile_updated', (payload: unknown) => {
-      const data = payload as { userId?: string; avatarVersion?: number };
+      const data = payload as {
+        userId?: string;
+        avatarVersion?: number;
+        avatarUrl?: string | null;
+      };
       if (!data?.userId || data.userId !== userId) return;
+      if (typeof data.avatarVersion === 'number') {
+        applyAvatarSyncUpdate({
+          userId,
+          avatarUrl: data.avatarUrl,
+          avatarVersion: data.avatarVersion,
+        });
+        if (data.avatarUrl !== undefined) {
+          setProfile((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  avatarUrl: data.avatarUrl ?? null,
+                  avatarVersion: data.avatarVersion!,
+                }
+              : prev
+          );
+        }
+      }
       invalidatePublicProfile(userId);
       void loadProfile();
     });
   }, [userId, loadProfile]);
 
+  const patchFriendProfileAvatar = useCallback(
+    (uid: string, avatarUrl: string | null, avatarVersion: number) => {
+      if (uid !== userId) return;
+      setProfile((prev) =>
+        prev ? { ...prev, avatarUrl, avatarVersion } : prev
+      );
+    },
+    [userId]
+  );
+  useLiveAvatarPatches(patchFriendProfileAvatar);
   const statusLabel = useMemo(() => {
     if (!profile) return '';
     if (profile.isSystemAccount) {

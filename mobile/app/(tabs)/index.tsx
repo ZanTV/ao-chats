@@ -23,6 +23,7 @@ import { socketService } from '../../src/services/socket';
 import { cacheManager, CacheDomain } from '../../src/cache';
 import { ActionMenuSheet } from '../../src/components/ActionMenuSheet';
 import { ConfirmDialog } from '../../src/components/ConfirmDialog';
+import { useLiveAvatarPatches } from '../../src/profile/useLiveAvatarPatches';
 import {
   ConversationSelectionBar,
   type ConversationListAction,
@@ -462,6 +463,29 @@ export default function HomeScreen() {
     };
   }, [loadConversations, applyConversationUpdate, removeConversationFromList, persistConversations]);
 
+  const patchConversationAvatar = useCallback(
+    (userId: string, avatarUrl: string | null, avatarVersion: number) => {
+      setConversations((prev) => {
+        let changed = false;
+        const next = prev.map((c) => {
+          if (c.otherUser?.id !== userId) return c;
+          changed = true;
+          return {
+            ...c,
+            otherUser: {
+              ...c.otherUser,
+              avatarUrl: avatarUrl as any,
+              avatarVersion: avatarVersion as any,
+            },
+          };
+        });
+        return changed ? next : prev;
+      });
+    },
+    []
+  );
+  useLiveAvatarPatches(patchConversationAvatar);
+
   const filtered = conversations.filter((c) => {
     if (!search) return true;
     const name = `${c.otherUser?.firstName} ${c.otherUser?.lastName}`.toLowerCase();
@@ -538,6 +562,7 @@ export default function HomeScreen() {
           </View>
         ) : null}
         <Avatar
+          userId={item.otherUser?.id}
           avatarId={item.otherUser?.avatarId || 'avatar-30'}
           imageUrl={(item.otherUser as { avatarUrl?: string } | undefined)?.avatarUrl}
           imageVersion={(item.otherUser as { avatarVersion?: number } | undefined)?.avatarVersion}

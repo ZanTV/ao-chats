@@ -17,12 +17,18 @@ const avatarUpload = multer({
   limits: { fileSize: UPLOAD_LIMITS.maxImageBytes },
 });
 
-function emitProfileUpdated(userId: string, avatarVersion: number) {
+function emitProfileUpdated(
+  userId: string,
+  avatarVersion: number,
+  avatarUrl?: string | null
+) {
   const io = getIO();
   if (!io) return;
+  // Proxy URL only — never signed Agrohub URLs or secrets.
   io.emit('profile_updated', {
     userId,
     avatarVersion,
+    avatarUrl: avatarUrl ?? null,
     updatedAt: new Date().toISOString(),
   });
 }
@@ -43,7 +49,11 @@ router.patch(
   asyncHandler(async (req: AuthRequest, res) => {
     const profile = await userService.updateProfile(req.userId!, req.body);
     if (req.body?.avatarId) {
-      emitProfileUpdated(req.userId!, profile.avatarVersion ?? 0);
+      emitProfileUpdated(
+        req.userId!,
+        profile.avatarVersion ?? 0,
+        profile.avatarUrl ?? null
+      );
     }
     res.json(profile);
   })
@@ -61,7 +71,11 @@ router.post(
         originalName: file.originalname || 'avatar.jpg',
         mimeType: file.mimetype,
       });
-      emitProfileUpdated(req.userId!, profile.avatarVersion ?? 0);
+      emitProfileUpdated(
+        req.userId!,
+        profile.avatarVersion ?? 0,
+        profile.avatarUrl ?? null
+      );
       res.json(profile);
     } catch (err) {
       if (err instanceof AppError) throw err;
@@ -77,7 +91,11 @@ router.delete(
   '/me/avatar',
   asyncHandler(async (req: AuthRequest, res) => {
     const profile = await userService.clearProfileAvatar(req.userId!);
-    emitProfileUpdated(req.userId!, profile.avatarVersion ?? 0);
+    emitProfileUpdated(
+      req.userId!,
+      profile.avatarVersion ?? 0,
+      profile.avatarUrl ?? null
+    );
     res.json(profile);
   })
 );

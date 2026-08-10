@@ -26,6 +26,7 @@ import { validateUsername, validateMobileNumber } from '../../src/utils/validati
 import { setPendingAvatarPhoto } from '../../src/profile/pendingAvatarPhoto';
 import { kindFromMimeClient, validatePendingAttachment } from '../../src/attachments/pending';
 import { invalidatePublicProfile, setCachedPublicProfile } from '../../src/cache/profileCache';
+import { applyAvatarSyncUpdate } from '../../src/profile/avatarSyncStore';
 import { ProfileSaveSuccessToast } from '../../src/components/ProfileSaveSuccessToast';
 import { Spacing, BorderRadius } from '../../src/theme';
 
@@ -126,12 +127,17 @@ export default function EditProfileScreen() {
       const updated = (await api.clearProfileAvatar()) as Parameters<typeof updateUser>[0];
       updateUser(updated);
       if (updated.id) {
+        applyAvatarSyncUpdate({
+          userId: updated.id,
+          avatarUrl: null,
+          avatarVersion: updated.avatarVersion ?? 0,
+        });
         invalidatePublicProfile(updated.id);
         setCachedPublicProfile({
           id: updated.id,
-          username: updated.username,
-          firstName: updated.firstName,
-          lastName: updated.lastName,
+          username: updated.username || '',
+          firstName: updated.firstName || '',
+          lastName: updated.lastName || '',
           avatarId: updated.avatarId || selectedAvatarId || 'avatar-1',
           avatarUrl: null,
           avatarVersion: updated.avatarVersion,
@@ -257,6 +263,7 @@ export default function EditProfileScreen() {
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.avatarSection}>
             <Avatar
+              userId={preferEmojiPreview ? undefined : user?.id}
               avatarId={selectedAvatarId}
               imageUrl={preferEmojiPreview ? null : user?.avatarUrl}
               imageVersion={user?.avatarVersion}

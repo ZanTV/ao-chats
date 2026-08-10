@@ -19,6 +19,7 @@ import {
 } from '../../src/profile/pendingAvatarPhoto';
 import { uploadProfileAvatar } from '../../src/attachments/uploadProfileAvatar';
 import { setCachedPublicProfile, invalidatePublicProfile } from '../../src/cache/profileCache';
+import { applyAvatarSyncUpdate } from '../../src/profile/avatarSyncStore';
 import { ProfileSaveSuccessToast } from '../../src/components/ProfileSaveSuccessToast';
 import { Spacing, BorderRadius } from '../../src/theme';
 import type { User } from '../../src/stores/authStore';
@@ -52,6 +53,11 @@ export default function AvatarPhotoPreviewScreen() {
     }
     updateUser(updated);
     if (updated.id) {
+      applyAvatarSyncUpdate({
+        userId: updated.id,
+        avatarUrl: updated.avatarUrl ?? null,
+        avatarVersion: updated.avatarVersion ?? 0,
+      });
       invalidatePublicProfile(updated.id);
       setCachedPublicProfile({
         id: updated.id,

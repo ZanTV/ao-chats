@@ -23,6 +23,7 @@ import { api } from '../../src/services/api';
 import { socketService } from '../../src/services/socket';
 import { cacheManager, CacheDomain } from '../../src/cache';
 import { Spacing, BorderRadius } from '../../src/theme';
+import { useLiveAvatarPatches } from '../../src/profile/useLiveAvatarPatches';
 import { formatConversationTime } from '../../src/utils/conversation';
 
 interface Friend {
@@ -123,6 +124,52 @@ export default function FriendsScreen() {
     ];
     return () => unsubs.forEach((u) => u());
   }, [loadData]);
+
+  const patchFriendAvatar = useCallback(
+    (userId: string, avatarUrl: string | null, avatarVersion: number) => {
+      const patchUser = <T extends { id: string }>(u: T): T =>
+        u.id === userId ? ({ ...u, avatarUrl, avatarVersion } as T) : u;
+
+      setFriends((prev) => {
+        let changed = false;
+        const next = prev.map((f) => {
+          if (f.id !== userId) return f;
+          changed = true;
+          return { ...f, avatarUrl: avatarUrl ?? undefined, avatarVersion };
+        });
+        return changed ? next : prev;
+      });
+      setRequests((prev) => {
+        let changed = false;
+        const next = prev.map((r) => {
+          if (r.sender?.id !== userId) return r;
+          changed = true;
+          return { ...r, sender: patchUser(r.sender) };
+        });
+        return changed ? next : prev;
+      });
+      setSentRequests((prev) => {
+        let changed = false;
+        const next = prev.map((r) => {
+          if (r.receiver?.id !== userId) return r;
+          changed = true;
+          return { ...r, receiver: patchUser(r.receiver) };
+        });
+        return changed ? next : prev;
+      });
+      setSearchResults((prev) => {
+        let changed = false;
+        const next = prev.map((u) => {
+          if (u.id !== userId) return u;
+          changed = true;
+          return { ...u, avatarUrl: avatarUrl ?? undefined, avatarVersion };
+        });
+        return changed ? next : prev;
+      });
+    },
+    []
+  );
+  useLiveAvatarPatches(patchFriendAvatar);
 
   const handleSearch = async (q: string) => {
     setSearchQuery(q);
@@ -253,6 +300,7 @@ export default function FriendsScreen() {
       delayLongPress={350}
     >
       <Avatar
+        userId={item.id}
         avatarId={item.avatarId}
         imageUrl={item.avatarUrl}
         imageVersion={item.avatarVersion}
@@ -277,6 +325,7 @@ export default function FriendsScreen() {
   const renderPendingReceived = (item: FriendRequest) => (
     <View style={[styles.item, styles.pendingItem, { backgroundColor: colors.surface, borderColor: colors.primary + '30' }]}>
       <Avatar
+        userId={item.sender.id}
         avatarId={item.sender.avatarId}
         imageUrl={(item.sender as Friend).avatarUrl}
         imageVersion={(item.sender as Friend).avatarVersion}
@@ -323,6 +372,7 @@ export default function FriendsScreen() {
   const renderPendingSent = (item: SentRequest) => (
     <View style={[styles.item, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <Avatar
+        userId={item.receiver.id}
         avatarId={item.receiver.avatarId}
         imageUrl={(item.receiver as Friend).avatarUrl}
         imageVersion={(item.receiver as Friend).avatarVersion}
@@ -368,6 +418,7 @@ export default function FriendsScreen() {
   const renderSearchResult = ({ item }: { item: SearchUser }) => (
     <View style={[styles.item, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <Avatar
+        userId={item.id}
         avatarId={item.avatarId}
         imageUrl={item.avatarUrl}
         imageVersion={item.avatarVersion}
