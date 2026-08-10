@@ -12,6 +12,8 @@ export type AgrohubChatUploadResult = {
   fileSize?: number;
 };
 
+export type AgrohubProfileUploadResult = AgrohubChatUploadResult;
+
 function storageBaseUrl(): string {
   return config.mediaStorage.apiUrl.replace(/\/$/, '');
 }
@@ -118,18 +120,22 @@ async function storageFetch(url: string, init: RequestInit): Promise<Response> {
   }
 }
 
+function normalizeStorageKey(storageKey: string): string {
+  return storageKey.replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
 /** Chat media keys written by Agrohub (not legacy local `{userId}/…`). */
 export function isAgrohubChatStorageKey(storageKey: string): boolean {
-  const key = storageKey.replace(/\\/g, '/');
+  const key = normalizeStorageKey(storageKey);
   return key.startsWith('media/') || key.startsWith('documents/');
 }
 
 /**
  * Keys that should be fetched from Agrohub when not present on local disk.
- * profiles/ may still be legacy local until profile integration; prefer local first.
+ * profiles/ may still be legacy local; prefer local first in openStoredFile.
  */
 export function isAgrohubPrefixedKey(storageKey: string): boolean {
-  const key = storageKey.replace(/\\/g, '/');
+  const key = normalizeStorageKey(storageKey);
   return (
     key.startsWith('media/') ||
     key.startsWith('documents/') ||
@@ -141,13 +147,38 @@ export function attachmentBelongsToConversation(
   storageKey: string,
   conversationId: string
 ): boolean {
-  const key = storageKey.replace(/\\/g, '/');
+  const key = normalizeStorageKey(storageKey);
   const id = conversationId.trim();
   if (!id) return false;
   return (
     key.startsWith(`media/${id}/`) ||
     key.startsWith(`documents/${id}/`)
   );
+}
+
+/**
+ * Validate Agrohub profile storageKey ownership.
+ * Accepts profiles/{userId}/… (including profiles/{userId}/avatar/…).
+ * Rejects path traversal, absolute escapes, and keys for other users.
+ */
+export function isValidProfileStorageKey(storageKey: string, userId: string): boolean {
+  const key = normalizeStorageKey(storageKey);
+  const id = userId.trim();
+  if (!id) return false;
+  if (!key || key.includes('..') || key.includes('\0')) return false;
+  if (key.startsWith('/') || /^[a-zA-Z]:/.test(key)) return false;
+  if (!key.startsWith('profiles/')) return false;
+
+  const parts = key.split('/').filter(Boolean);
+  // profiles / {userId} / … (at least one more segment for the object)
+  if (parts.length < 3) return false;
+  if (parts[0] !== 'profiles') return false;
+  if (parts[1] !== id) return false;
+  return true;
+}
+
+export function profileAvatarBelongsToUser(storageKey: string, userId: string): boolean {
+  return isValidProfileStorageKey(storageKey, userId);
 }
 
 export class AgrohubStorageClient {
@@ -163,6 +194,52 @@ export class AgrohubStorageClient {
     form.append('file', blob, params.fileName);
     form.append('storageType', 'chat');
     form.append('conversationId', params.conversationId);
+
+    const res = await storageFetch(`${storageBaseUrl()}/api/upload`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: form,
+    });
+
+    const json = await readJsonSafe(res);
+    if (!res.ok) {
+      throw mapStorageHttpError(res.status, 'Upload failed. Try again.');
+    }
+
+    const storageKey = pickString(json, ['storageKey', 'key', 'path']);
+    if (!storageKey) {
+      throw new AppError(502, 'Media storage returned an invalid response.', 'STORAGE_BAD_RESPONSE');
+    }
+
+    return {
+      storageKey,
+      mimeType: pickString(json, ['mimeType', 'contentType', 'content_type']),
+      fileName: pickString(json, ['fileName', 'filename', 'originalName']),
+      fileSize: pickNumber(json, ['fileSize', 'size', 'bytes']),
+    };
+  }
+
+  /**
+   * Profile avatar upload. Multipart mirrors chat upload but uses storageType=profile
+   * and authenticated userId (never client-chosen path).
+   */
+  async uploadProfileFile(params: {
+    userId: string;
+    buffer: Buffer;
+    fileName: string;
+    mimeType: string;
+  }): Promise<AgrohubProfileUploadResult> {
+    const userId = String(params.userId || '').trim();
+    if (!userId) {
+      throw new AppError(400, 'userId is required for profile upload.', 'USER_ID_REQUIRED');
+    }
+
+    const form = new FormData();
+    const bytes = new Uint8Array(params.buffer);
+    const blob = new Blob([bytes], { type: params.mimeType || 'application/octet-stream' });
+    form.append('file', blob, params.fileName);
+    form.append('storageType', 'profile');
+    form.append('userId', userId);
 
     const res = await storageFetch(`${storageBaseUrl()}/api/upload`, {
       method: 'POST',

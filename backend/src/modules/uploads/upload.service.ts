@@ -19,6 +19,7 @@ import {
   agrohubStorage,
   attachmentBelongsToConversation,
   isAgrohubChatStorageKey,
+  isValidProfileStorageKey,
 } from './agrohubStorage.client';
 
 const UPLOAD_ROOT = path.resolve(process.cwd(), 'uploads');
@@ -205,8 +206,9 @@ export class UploadService {
   }
 
   /**
-   * Persist a custom profile photo under profiles/{userId}/… (not chat attachments).
-   * Profile → Agrohub integration is intentionally deferred.
+   * Persist a custom profile photo under profiles/{userId}/…
+   * When PROFILE_STORAGE_PROVIDER=agrohub → Agrohub (storageType=profile).
+   * Otherwise → local disk. Dual-read serving remains unchanged.
    */
   async saveProfileAvatar(params: {
     uploaderId: string;
@@ -225,6 +227,56 @@ export class UploadService {
       throw new AppError(400, 'Empty file.');
     }
 
+    if (config.profileStorage.provider === 'agrohub') {
+      return this.saveAgrohubProfileAvatar(params, mime);
+    }
+
+    return this.saveLocalProfileAvatar(params, mime);
+  }
+
+  private async saveAgrohubProfileAvatar(
+    params: {
+      uploaderId: string;
+      buffer: Buffer;
+      originalName: string;
+      mimeType: string;
+    },
+    mime: string
+  ): Promise<{ storageKey: string; url: string; mimeType: string; fileSize: number }> {
+    const userId = String(params.uploaderId || '').trim();
+    if (!userId) {
+      throw new AppError(400, 'Invalid user.');
+    }
+
+    const safeName = sanitizeFileName(params.originalName || 'avatar.jpg');
+    const uploaded = await agrohubStorage.uploadProfileFile({
+      userId,
+      buffer: params.buffer,
+      fileName: safeName,
+      mimeType: mime,
+    });
+
+    if (!isValidProfileStorageKey(uploaded.storageKey, userId)) {
+      throw new AppError(502, 'Media storage returned an invalid key.', 'STORAGE_BAD_KEY');
+    }
+
+    return {
+      storageKey: uploaded.storageKey,
+      url: proxyAttachmentUrl(uploaded.storageKey),
+      mimeType: mime,
+      fileSize: params.buffer.length,
+    };
+  }
+
+  private saveLocalProfileAvatar(
+    params: {
+      uploaderId: string;
+      buffer: Buffer;
+      originalName: string;
+      mimeType: string;
+    },
+    mime: string
+  ): { storageKey: string; url: string; mimeType: string; fileSize: number } {
     ensureUploadRoot();
     const id = randomUUID();
     const safeName = sanitizeFileName(params.originalName || 'avatar.jpg');

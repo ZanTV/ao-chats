@@ -85,6 +85,7 @@ export const config = {
    * - local: legacy disk under uploads/
    * - agrohub: https://storage.agrohub.ltd (new uploads only; dual-read for serving)
    * STORAGE_API_SECRET stays server-side only.
+   * Independent of PROFILE_STORAGE_PROVIDER.
    */
   mediaStorage: {
     provider: (process.env.MEDIA_STORAGE_PROVIDER?.trim().toLowerCase() || 'local') as
@@ -93,6 +94,17 @@ export const config = {
     apiUrl: process.env.STORAGE_API_URL?.trim() || 'https://storage.agrohub.ltd',
     apiSecret: process.env.STORAGE_API_SECRET?.trim() || '',
     timeoutMs: envInt('STORAGE_API_TIMEOUT_MS', 30_000),
+  },
+  /**
+   * Profile avatar blob backend (independent of chat MEDIA_STORAGE_PROVIDER).
+   * - local: disk under uploads/profiles/{userId}/…
+   * - agrohub: storage.agrohub.ltd with storageType=profile
+   * Reuses STORAGE_API_URL / STORAGE_API_SECRET / STORAGE_API_TIMEOUT_MS.
+   */
+  profileStorage: {
+    provider: (process.env.PROFILE_STORAGE_PROVIDER?.trim().toLowerCase() || 'local') as
+      | 'local'
+      | 'agrohub',
   },
   clientUrl: isProduction
     ? env('CLIENT_URL')

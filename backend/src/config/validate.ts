@@ -116,6 +116,18 @@ export function validateEnvironment(
     );
   }
 
+  const profileProvider = (getEnv('PROFILE_STORAGE_PROVIDER') || 'local').toLowerCase();
+  if (profileProvider === 'agrohub' && !getEnv('STORAGE_API_SECRET')) {
+    warnings.push(
+      'PROFILE_STORAGE_PROVIDER=agrohub but STORAGE_API_SECRET is not set (profile uploads will fail)'
+    );
+  }
+  if (profileProvider !== 'local' && profileProvider !== 'agrohub') {
+    warnings.push(
+      `PROFILE_STORAGE_PROVIDER="${profileProvider}" is unknown (expected local or agrohub)`
+    );
+  }
+
   const localhostViolations = isProduction
     ? findLocalhostViolations(PRODUCTION_NO_LOCALHOST)
     : [];
