@@ -92,18 +92,39 @@ export default function FriendSharedMediaScreen() {
     void load();
   }, [load]);
 
-  // Realtime: refresh list when new media arrives or messages are deleted
+  // Realtime: prepend new media from message:new without waiting for refetch
   useEffect(() => {
     if (!cid) return;
-    const refresh = () => {
-      void load(null, false);
-    };
     const unsubs = [
       socketService.on('message:new', (data: unknown) => {
-        const msg = data as { conversationId?: string; attachment?: unknown; type?: string };
-        if (msg.conversationId !== cid) return;
-        if (!msg.attachment && msg.type === 'TEXT') return;
-        refresh();
+        const msg = data as {
+          id?: string;
+          conversationId?: string;
+          attachment?: unknown;
+          type?: string;
+          content?: string;
+          createdAt?: string;
+        };
+        if (msg.conversationId !== cid || !msg.id) return;
+        const att = coerceAttachment(msg.attachment);
+        if (!att) return;
+        if (mediaType === 'image' && att.kind !== 'image') return;
+        if (mediaType === 'video' && att.kind !== 'video') return;
+        if (mediaType === 'document' && att.kind !== 'document') return;
+        if (mediaType === 'link') return;
+
+        setItems((prev) => {
+          if (prev.some((i) => i.messageId === msg.id)) return prev;
+          return [
+            {
+              messageId: msg.id!,
+              content: msg.content || '',
+              createdAt: msg.createdAt || new Date().toISOString(),
+              attachment: att,
+            },
+            ...prev,
+          ];
+        });
       }),
       socketService.on('message:delete', (data: unknown) => {
         const payload = data as { conversationId?: string; messageId?: string };
@@ -111,12 +132,12 @@ export default function FriendSharedMediaScreen() {
         if (payload.messageId) {
           setItems((prev) => prev.filter((i) => i.messageId !== payload.messageId));
         } else {
-          refresh();
+          void load(null, false);
         }
       }),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [cid, load]);
+  }, [cid, load, mediaType]);
 
   const openAttachment = (attachment?: MessageAttachment | null) => {
     if (!attachment?.id) return;

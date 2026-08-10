@@ -3,7 +3,8 @@ import { authenticate, AuthRequest } from '../../middleware/auth';
 import { asyncHandler, AppError } from '../../middleware/errorHandler';
 import { prisma } from '../../config/database';
 import type { MessageAttachment } from '../../utils/attachment';
-import { isMessageAttachmentLike } from '../../utils/attachment';
+import { isMessageAttachmentLike, normalizeAttachmentPayload } from '../../utils/attachment';
+import { config } from '../../config';
 
 const router = Router();
 
@@ -60,7 +61,10 @@ router.get(
       throw new AppError(404, 'Media unavailable');
     }
 
-    const attachment = row.attachment as MessageAttachment;
+    const attachment = normalizeAttachmentPayload(
+      row.attachment,
+      config.apiUrl
+    ) as MessageAttachment;
 
     // Sibling media in same conversation (for swipe navigation) — capped
     const siblings = await prisma.$queryRaw<Array<{ attachment: unknown }>>`
@@ -78,8 +82,8 @@ router.get(
     `;
 
     const gallery = siblings
-      .map((s) => s.attachment)
-      .filter(isMessageAttachmentLike) as MessageAttachment[];
+      .map((s) => normalizeAttachmentPayload(s.attachment, config.apiUrl))
+      .filter((a): a is MessageAttachment => a !== null);
 
     res.json({
       media: {

@@ -258,11 +258,18 @@ export class MessageService {
     if (!cursor) {
       const cached = await cacheGetVersioned<unknown[]>(cacheKey);
       if (cached?.data && Array.isArray(cached.data) && cached.data.length > 0) {
-        const oldest = cached.data[0] as { createdAt?: string };
+        const normalized = withNormalizedAttachments(cached.data as { attachment?: unknown }[]);
+        const oldest = normalized[0] as { createdAt?: string | Date };
+        const oldestIso =
+          oldest?.createdAt instanceof Date
+            ? oldest.createdAt.toISOString()
+            : typeof oldest?.createdAt === 'string'
+              ? oldest.createdAt
+              : null;
         return {
-          messages: cached.data,
-          nextCursor: oldest?.createdAt ?? null,
-          hasMore: cached.data.length >= limit,
+          messages: normalized,
+          nextCursor: oldestIso,
+          hasMore: normalized.length >= limit,
           cacheVersion: cached.version,
         };
       }
@@ -325,7 +332,7 @@ export class MessageService {
       }),
     ]);
 
-    return [...before.reverse(), ...after];
+    return withNormalizedAttachments([...before.reverse(), ...after]);
   }
 
   async searchMessages(conversationId: string, userId: string, query: string) {

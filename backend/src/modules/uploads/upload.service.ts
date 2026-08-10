@@ -12,6 +12,7 @@ import {
   sanitizeFileName,
   ALLOWED_IMAGE_MIME,
   UPLOAD_LIMITS,
+  buildAttachmentProxyUrl,
   type MessageAttachment,
 } from '../../utils/attachment';
 import {
@@ -38,9 +39,7 @@ export function resolveUploadPath(storageKey: string): string {
 }
 
 function proxyAttachmentUrl(storageKey: string): string {
-  const publicPath = `/api/uploads/files/${encodeURIComponent(storageKey)}`;
-  const base = config.apiUrl.replace(/\/$/, '');
-  return `${base}${publicPath}`;
+  return buildAttachmentProxyUrl(storageKey, config.apiUrl);
 }
 
 function mimeFromFileName(fileName: string): string {

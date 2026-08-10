@@ -40,15 +40,21 @@ export function AOVideoPlayer({ uri, durationHint, labels }: Props) {
   const [duration, setDuration] = useState(durationHint || 0);
   const [speedHold, setSpeedHold] = useState(false);
   const [barWidth, setBarWidth] = useState(1);
+  const [surfaceWidth, setSurfaceWidth] = useState(1);
+  const surfaceWidthRef = useRef(1);
   const [volume, setVolume] = useState(1);
+  const [brightness, setBrightness] = useState(1);
+  const [seeking, setSeeking] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTap = useRef(0);
   const baseSpeed = useRef(1);
 
   const scheduleHide = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setControls(false), 2800);
-  }, []);
+    if (!seeking) {
+      hideTimer.current = setTimeout(() => setControls(false), 2800);
+    }
+  }, [seeking]);
 
   useEffect(() => {
     const sub = player.addListener('playingChange', ({ isPlaying }) => {
@@ -56,7 +62,7 @@ export function AOVideoPlayer({ uri, durationHint, labels }: Props) {
     });
     const status = setInterval(() => {
       try {
-        setPosition(player.currentTime || 0);
+        if (!seeking) setPosition(player.currentTime || 0);
         const d = player.duration || durationHint || 0;
         if (d > 0) setDuration(d);
       } catch {
@@ -69,7 +75,7 @@ export function AOVideoPlayer({ uri, durationHint, labels }: Props) {
       clearInterval(status);
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
-  }, [player, durationHint, scheduleHide]);
+  }, [player, durationHint, scheduleHide, seeking]);
 
   const togglePlay = useCallback(() => {
     if (player.playing) player.pause();
@@ -78,20 +84,47 @@ export function AOVideoPlayer({ uri, durationHint, labels }: Props) {
     scheduleHide();
   }, [player, scheduleHide]);
 
-  const onSurfacePress = () => {
+  const seekToRatio = useCallback(
+    (ratio: number) => {
+      const clamped = Math.max(0, Math.min(1, ratio));
+      const d = duration || player.duration || 0;
+      const next = clamped * d;
+      player.currentTime = next;
+      setPosition(next);
+      setControls(true);
+      scheduleHide();
+    },
+    [duration, player, scheduleHide]
+  );
+
+  const seekBy = useCallback(
+    (delta: number) => {
+      const d = duration || player.duration || 0;
+      const next = Math.max(0, Math.min(d, (player.currentTime || 0) + delta));
+      player.currentTime = next;
+      setPosition(next);
+      setControls(true);
+      scheduleHide();
+    },
+    [duration, player, scheduleHide]
+  );
+
+  const onSurfacePress = (locationX: number) => {
     const now = Date.now();
-    if (now - lastTap.current < 280) {
-      togglePlay();
+    if (now - lastTap.current < 320) {
+      if (locationX < surfaceWidth * 0.35) seekBy(-10);
+      else if (locationX > surfaceWidth * 0.65) seekBy(10);
+      else togglePlay();
       lastTap.current = 0;
       return;
     }
     lastTap.current = now;
     setTimeout(() => {
-      if (Date.now() - lastTap.current >= 260) {
+      if (Date.now() - lastTap.current >= 300) {
         setControls((c) => !c);
-        if (!controls) scheduleHide();
+        scheduleHide();
       }
-    }, 260);
+    }, 320);
   };
 
   const startHold2x = () => {
@@ -105,53 +138,82 @@ export function AOVideoPlayer({ uri, durationHint, labels }: Props) {
     setSpeedHold(false);
   };
 
-  const seekToRatio = (ratio: number) => {
-    const clamped = Math.max(0, Math.min(1, ratio));
-    const next = clamped * (duration || 0);
-    player.currentTime = next;
-    setPosition(next);
-    setControls(true);
-    scheduleHide();
-  };
-
   const longPress = Gesture.LongPress()
     .minDuration(220)
-    .onStart(() => {
-      runOnJS(startHold2x)();
-    })
-    .onEnd(() => {
-      runOnJS(endHold2x)();
-    })
-    .onFinalize(() => {
-      runOnJS(endHold2x)();
-    });
+    .onStart(() => runOnJS(startHold2x)())
+    .onEnd(() => runOnJS(endHold2x)())
+    .onFinalize(() => runOnJS(endHold2x)());
 
-  const volumeSwipe = Gesture.Pan().onUpdate((e) => {
-    if (Platform.OS === 'web') {
-      // Browser: adjust player volume (cannot control system volume reliably)
-      if (Math.abs(e.translationY) > 8 && Math.abs(e.translationY) > Math.abs(e.translationX)) {
-        const next = Math.max(0, Math.min(1, volume - e.translationY / 400));
+  const touchStartX = useRef(0);
+
+  const volumePan = Gesture.Pan()
+    .onBegin((e) => {
+      touchStartX.current = e.x;
+    })
+    .onUpdate((e) => {
+      if (
+        touchStartX.current > surfaceWidthRef.current * 0.72 &&
+        Math.abs(e.translationY) > Math.abs(e.translationX) + 8 &&
+        Platform.OS === 'web'
+      ) {
+        const next = Math.max(0, Math.min(1, volume - e.translationY / 320));
         runOnJS(setVolume)(next);
         runOnJS((v: number) => {
           player.volume = v;
         })(next);
       }
-    }
-  });
+    });
 
-  const composed = Gesture.Simultaneous(longPress, volumeSwipe);
+  const brightnessPan = Gesture.Pan()
+    .enabled(Platform.OS === 'web')
+    .onBegin((e) => {
+      touchStartX.current = e.x;
+    })
+    .onUpdate((e) => {
+      if (
+        touchStartX.current < surfaceWidthRef.current * 0.28 &&
+        Math.abs(e.translationY) > Math.abs(e.translationX) + 8
+      ) {
+        const next = Math.max(0.35, Math.min(1.35, brightness - e.translationY / 400));
+        runOnJS(setBrightness)(next);
+      }
+    });
+
+  const surfaceGesture = Gesture.Simultaneous(longPress, volumePan, brightnessPan);
+
+  const progressPan = Gesture.Pan()
+    .onBegin(() => runOnJS(setSeeking)(true))
+    .onUpdate((e) => {
+      if (barWidth > 0) {
+        runOnJS(seekToRatio)(Math.max(0, Math.min(1, e.x / barWidth)));
+      }
+    })
+    .onFinalize(() => {
+      runOnJS(setSeeking)(false);
+      runOnJS(scheduleHide)();
+    });
 
   return (
     <View style={styles.root}>
-      <GestureDetector gesture={composed}>
-        <Pressable style={styles.surface} onPress={onSurfacePress}>
-          <VideoView
+      <GestureDetector gesture={surfaceGesture}>
+        <Pressable
+          style={styles.surface}
+          onPress={(e) => onSurfacePress(e.nativeEvent.locationX)}
+          onLayout={(e: LayoutChangeEvent) => {
+            const w = e.nativeEvent.layout.width || 1;
+            surfaceWidthRef.current = w;
+            setSurfaceWidth(w);
+          }}
+        >
+          <View style={[StyleSheet.absoluteFill, Platform.OS === 'web' ? { opacity: brightness } : null]}>
+            <VideoView
             style={styles.video}
             player={player}
             contentFit="contain"
             nativeControls={false}
             fullscreenOptions={{ enable: true }}
           />
+          </View>
           {speedHold && (
             <View style={styles.speedBadge}>
               <Text style={styles.speedText}>2.0×</Text>
@@ -162,35 +224,40 @@ export function AOVideoPlayer({ uri, durationHint, labels }: Props) {
               <Ionicons name="play" size={48} color="#fff" />
             </View>
           )}
+          {Platform.OS !== 'web' && (
+            <View style={styles.hintRow} pointerEvents="none">
+              <Text style={styles.hintText}>← 10s</Text>
+              <Text style={styles.hintText}>10s →</Text>
+            </View>
+          )}
         </Pressable>
       </GestureDetector>
 
       {controls && (
         <View style={styles.controls}>
           <Text style={styles.time}>{formatTime(position)}</Text>
-          <Pressable
-            style={styles.track}
-            onLayout={(e: LayoutChangeEvent) => setBarWidth(e.nativeEvent.layout.width || 1)}
-            onPress={(e) => {
-              seekToRatio(e.nativeEvent.locationX / barWidth);
-            }}
-          >
-            <View style={styles.trackBg} />
+          <GestureDetector gesture={progressPan}>
             <View
-              style={[
-                styles.trackFill,
-                { width: `${duration > 0 ? Math.min(100, (position / duration) * 100) : 0}%` },
-              ]}
-            />
-            <View
-              style={[
-                styles.thumb,
-                {
-                  left: `${duration > 0 ? Math.min(100, (position / duration) * 100) : 0}%`,
-                },
-              ]}
-            />
-          </Pressable>
+              style={styles.track}
+              onLayout={(e: LayoutChangeEvent) => setBarWidth(e.nativeEvent.layout.width || 1)}
+            >
+              <View style={styles.trackBg} />
+              <View
+                style={[
+                  styles.trackFill,
+                  { width: `${duration > 0 ? Math.min(100, (position / duration) * 100) : 0}%` },
+                ]}
+              />
+              <View
+                style={[
+                  styles.thumb,
+                  {
+                    left: `${duration > 0 ? Math.min(100, (position / duration) * 100) : 0}%`,
+                  },
+                ]}
+              />
+            </View>
+          </GestureDetector>
           <Text style={styles.time}>{formatTime(duration)}</Text>
           <Pressable onPress={togglePlay} hitSlop={8}>
             <Ionicons name={playing ? 'pause' : 'play'} size={22} color="#fff" />
@@ -264,6 +331,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  hintRow: {
+    position: 'absolute',
+    bottom: 72,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+  },
+  hintText: { color: 'rgba(255,255,255,0.55)', fontSize: 11 },
   loading: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',

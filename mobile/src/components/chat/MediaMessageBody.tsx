@@ -10,13 +10,17 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import type { MessageAttachment } from '../../attachments/types';
 import { formatFileSize } from '../../attachments/types';
 import {
   ensureLocalAttachment,
   getLocalAttachment,
+  invalidateLocalAttachment,
+  resolveAttachmentUrl,
   type DownloadState,
 } from '../../attachments/storage';
+import { getAccessToken } from '../../services/storage';
 import { BorderRadius, Spacing } from '../../theme';
 
 interface Props {
@@ -34,10 +38,73 @@ interface Props {
     downloadFailed: string;
     retry: string;
     open: string;
+    unavailable?: string;
   };
-  /** Reserved for AO Media Viewer V2 */
   onOpenViewer?: (attachment: MessageAttachment) => void;
   renderCaption?: (caption: string) => React.ReactNode;
+}
+
+function NativeVideoPreview({
+  attachment,
+  width,
+  height,
+  onPress,
+}: {
+  attachment: MessageAttachment;
+  width: number;
+  height: number;
+  onPress: () => void;
+}) {
+  const [token, setToken] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    getAccessToken().then(setToken).catch(() => setFailed(true));
+  }, []);
+
+  const source = token && !failed
+    ? {
+        uri: resolveAttachmentUrl(attachment),
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    : '';
+
+  const player = useVideoPlayer(source, (p) => {
+    p.muted = true;
+    p.loop = false;
+  });
+
+  useEffect(() => {
+    const sub = player.addListener('statusChange', ({ status, error }) => {
+      if (status === 'error') setFailed(true);
+      if (error) setFailed(true);
+    });
+    return () => sub.remove();
+  }, [player]);
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={onPress}
+      style={{ width, height, borderRadius: BorderRadius.md, overflow: 'hidden' }}
+    >
+      {token && !failed ? (
+        <VideoView
+          style={StyleSheet.absoluteFill}
+          player={player}
+          contentFit="cover"
+          nativeControls={false}
+        />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, styles.center]}>
+          <ActivityIndicator color="#fff" />
+        </View>
+      )}
+      <View style={styles.videoPlayOverlay} pointerEvents="none">
+        <Ionicons name="play-circle" size={48} color="#fff" />
+      </View>
+    </TouchableOpacity>
+  );
 }
 
 export function MediaMessageBody({
@@ -56,57 +123,56 @@ export function MediaMessageBody({
   const [state, setState] = useState<DownloadState>('NOT_DOWNLOADED');
   const [progress, setProgress] = useState(0);
   const [localUri, setLocalUri] = useState<string | null>(null);
+  const [imageBroken, setImageBroken] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-    (async () => {
-      const local = await getLocalAttachment(attachment.id);
-      if (cancelled) return;
-      if (local) {
+  const loadMedia = useCallback(
+    async (signal?: AbortSignal, force = false) => {
+      if (force) {
+        await invalidateLocalAttachment(attachment.id);
+        setLocalUri(null);
+        setImageBroken(false);
+      }
+
+      const local = await getLocalAttachment(attachment.id, attachment.storageKey);
+      if (local?.localUri) {
         setLocalUri(local.localUri);
         setState('DOWNLOADED');
         setProgress(1);
         return;
       }
-      // Auto-fetch images for inline preview; docs/videos wait for tap.
-      if (attachment.kind === 'image') {
-        setState('DOWNLOADING');
-        try {
-          const record = await ensureLocalAttachment(
-            attachment,
-            (p) => {
-              if (!cancelled) setProgress(p);
-            },
-            controller.signal
-          );
-          if (cancelled) return;
-          setLocalUri(record.localUri);
-          setState('DOWNLOADED');
-          setProgress(1);
-        } catch {
-          if (!cancelled) setState('DOWNLOAD_FAILED');
-        }
+
+      if (attachment.kind === 'video' && Platform.OS !== 'web') {
+        setState('DOWNLOADED');
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [attachment]);
+
+      setState('DOWNLOADING');
+      try {
+        const record = await ensureLocalAttachment(
+          attachment,
+          (p) => setProgress(p),
+          signal
+        );
+        setLocalUri(record.localUri);
+        setState('DOWNLOADED');
+        setProgress(1);
+        setImageBroken(false);
+      } catch {
+        setState('DOWNLOAD_FAILED');
+      }
+    },
+    [attachment]
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadMedia(controller.signal);
+    return () => controller.abort();
+  }, [loadMedia]);
 
   const startDownload = useCallback(async () => {
-    setState('DOWNLOADING');
-    setProgress(0);
-    try {
-      const record = await ensureLocalAttachment(attachment, (p) => setProgress(p));
-      setLocalUri(record.localUri);
-      setState('DOWNLOADED');
-      setProgress(1);
-    } catch {
-      setState('DOWNLOAD_FAILED');
-    }
-  }, [attachment]);
+    await loadMedia(undefined, true);
+  }, [loadMedia]);
 
   const openLocal = useCallback(async () => {
     if (onOpenViewer) {
@@ -125,42 +191,68 @@ export function MediaMessageBody({
     Linking.openURL(uri).catch(() => {});
   }, [attachment, localUri, onOpenViewer, startDownload]);
 
+  const handleImageError = useCallback(() => {
+    setImageBroken(true);
+    void startDownload();
+  }, [startDownload]);
+
   if (attachment.kind === 'image') {
-    const canShow = Boolean(localUri);
+    const canShow = Boolean(localUri) && !imageBroken && state === 'DOWNLOADED';
     return (
       <View style={styles.mediaWrap}>
         <TouchableOpacity
           activeOpacity={0.9}
           onPress={() => {
-            if (onOpenViewer) {
-              openLocal();
-              return;
-            }
-            if (state === 'DOWNLOADED') openLocal();
+            if (onOpenViewer) openLocal();
+            else if (state === 'DOWNLOADED' && canShow) openLocal();
             else if (state !== 'DOWNLOADING') startDownload();
           }}
         >
           {canShow ? (
-            <Image source={{ uri: localUri! }} style={styles.image} resizeMode="cover" />
+            <Image
+              source={{ uri: localUri! }}
+              style={styles.image}
+              resizeMode="cover"
+              onError={handleImageError}
+            />
           ) : (
-            <View style={[styles.image, styles.imagePlaceholder, { backgroundColor: isOwn ? 'rgba(0,0,0,0.2)' : surfaceColor }]}>
+            <View
+              style={[
+                styles.image,
+                styles.imagePlaceholder,
+                { backgroundColor: isOwn ? 'rgba(0,0,0,0.2)' : surfaceColor },
+              ]}
+            >
               {state === 'DOWNLOADING' ? (
-                <Text style={{ color: textColor, fontWeight: '700' }}>{Math.round(progress * 100)}%</Text>
+                <>
+                  <ActivityIndicator color={primaryColor} />
+                  <Text style={{ color: textColor, fontWeight: '700', marginTop: 8 }}>
+                    {Math.round(progress * 100)}%
+                  </Text>
+                </>
+              ) : state === 'DOWNLOAD_FAILED' ? (
+                <>
+                  <Ionicons name="image-outline" size={28} color={mutedColor} />
+                  <Text style={{ color: primaryColor, fontSize: fonts.xs, marginTop: 6 }}>
+                    {labels.retry}
+                  </Text>
+                </>
               ) : (
-                <Ionicons name="image-outline" size={28} color={mutedColor} />
-              )}
-              {state === 'DOWNLOAD_FAILED' && (
-                <Text style={{ color: primaryColor, fontSize: fonts.xs, marginTop: 6 }}>{labels.retry}</Text>
-              )}
-              {state === 'NOT_DOWNLOADED' && (
-                <Text style={{ color: primaryColor, fontSize: fonts.xs, marginTop: 6 }}>{labels.download}</Text>
+                <>
+                  <Ionicons name="image-outline" size={28} color={mutedColor} />
+                  <Text style={{ color: primaryColor, fontSize: fonts.xs, marginTop: 6 }}>
+                    {labels.download}
+                  </Text>
+                </>
               )}
             </View>
           )}
         </TouchableOpacity>
         {!!caption?.trim() && (
           <View style={styles.captionWrap}>
-            {renderCaption ? renderCaption(caption) : (
+            {renderCaption ? (
+              renderCaption(caption)
+            ) : (
               <Text style={{ color: textColor, fontSize: fonts.md }}>{caption}</Text>
             )}
           </View>
@@ -170,40 +262,70 @@ export function MediaMessageBody({
   }
 
   if (attachment.kind === 'video') {
+    const useStreamingPreview = Platform.OS !== 'web' && state !== 'DOWNLOAD_FAILED';
+
     return (
       <View style={styles.mediaWrap}>
-        <TouchableOpacity
-          style={[styles.videoPlaceholder, { backgroundColor: isOwn ? 'rgba(0,0,0,0.25)' : surfaceColor }]}
-          activeOpacity={0.85}
-          onPress={() => {
-            if (onOpenViewer) openLocal();
-            else if (state === 'DOWNLOADED') openLocal();
-            else startDownload();
-          }}
+        {useStreamingPreview ? (
+          <NativeVideoPreview
+            attachment={attachment}
+            width={240}
+            height={160}
+            onPress={() => {
+              if (onOpenViewer) openLocal();
+              else if (localUri) openLocal();
+              else startDownload();
+            }}
+          />
+        ) : (
+          <TouchableOpacity
+            style={[
+              styles.videoPlaceholder,
+              { backgroundColor: isOwn ? 'rgba(0,0,0,0.25)' : surfaceColor },
+            ]}
+            activeOpacity={0.85}
+            onPress={() => {
+              if (onOpenViewer) openLocal();
+              else if (state === 'DOWNLOADED' && localUri) openLocal();
+              else startDownload();
+            }}
+          >
+            {localUri && state === 'DOWNLOADED' && Platform.OS === 'web' ? (
+              <View style={{ width: '100%', height: '100%' }}>
+                <Ionicons name="play-circle" size={48} color={textColor} />
+              </View>
+            ) : (
+              <Ionicons name="play-circle" size={48} color={textColor} />
+            )}
+            {state === 'DOWNLOADING' && (
+              <Text style={{ color: textColor, fontSize: fonts.sm, marginTop: 8 }}>
+                {labels.downloading} {Math.round(progress * 100)}%
+              </Text>
+            )}
+            {state === 'NOT_DOWNLOADED' && (
+              <Text style={{ color: primaryColor, fontSize: fonts.sm, marginTop: 8 }}>
+                {labels.download}
+              </Text>
+            )}
+            {state === 'DOWNLOAD_FAILED' && (
+              <Text style={{ color: primaryColor, fontSize: fonts.sm, marginTop: 8 }}>
+                {labels.retry}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
+        <Text
+          style={{ color: mutedColor, fontSize: fonts.xs, marginTop: 4, paddingHorizontal: 2 }}
+          numberOfLines={1}
         >
-          <Ionicons name="play-circle" size={48} color={textColor} />
-          <Text style={{ color: mutedColor, fontSize: fonts.xs, marginTop: 6 }}>
-            {attachment.fileName}
-          </Text>
-          {state === 'DOWNLOADING' && (
-            <Text style={{ color: textColor, fontSize: fonts.sm, marginTop: 8 }}>
-              {labels.downloading} {Math.round(progress * 100)}%
-            </Text>
-          )}
-          {state === 'NOT_DOWNLOADED' && (
-            <Text style={{ color: primaryColor, fontSize: fonts.sm, marginTop: 8 }}>
-              {labels.download}
-            </Text>
-          )}
-          {state === 'DOWNLOAD_FAILED' && (
-            <Text style={{ color: primaryColor, fontSize: fonts.sm, marginTop: 8 }}>
-              {labels.retry}
-            </Text>
-          )}
-        </TouchableOpacity>
+          {attachment.fileName}
+          {attachment.duration ? ` · ${Math.round(attachment.duration)}s` : ''}
+        </Text>
         {!!caption?.trim() && (
           <View style={styles.captionWrap}>
-            {renderCaption ? renderCaption(caption) : (
+            {renderCaption ? (
+              renderCaption(caption)
+            ) : (
               <Text style={{ color: textColor, fontSize: fonts.md }}>{caption}</Text>
             )}
           </View>
@@ -219,11 +341,13 @@ export function MediaMessageBody({
         activeOpacity={0.8}
         onPress={() => {
           if (onOpenViewer) openLocal();
-          else if (state === 'DOWNLOADED') openLocal();
+          else if (state === 'DOWNLOADED' && localUri) openLocal();
           else startDownload();
         }}
       >
-        <View style={[styles.docIcon, { backgroundColor: isOwn ? 'rgba(255,255,255,0.18)' : surfaceColor }]}>
+        <View
+          style={[styles.docIcon, { backgroundColor: isOwn ? 'rgba(255,255,255,0.18)' : surfaceColor }]}
+        >
           {state === 'DOWNLOADING' ? (
             <ActivityIndicator color={primaryColor} />
           ) : (
@@ -235,15 +359,23 @@ export function MediaMessageBody({
             {attachment.fileName}
           </Text>
           <Text style={{ color: mutedColor, fontSize: fonts.xs, marginTop: 2 }}>
-            {attachment.mimeType.split('/').pop()?.toUpperCase() || 'FILE'} · {formatFileSize(attachment.fileSize)}
+            {attachment.mimeType.split('/').pop()?.toUpperCase() || 'FILE'} ·{' '}
+            {formatFileSize(attachment.fileSize)}
           </Text>
           {state === 'DOWNLOADING' && (
             <View style={styles.barTrack}>
-              <View style={[styles.barFill, { width: `${Math.round(progress * 100)}%`, backgroundColor: primaryColor }]} />
+              <View
+                style={[
+                  styles.barFill,
+                  { width: `${Math.round(progress * 100)}%`, backgroundColor: primaryColor },
+                ]}
+              />
             </View>
           )}
           {state === 'DOWNLOAD_FAILED' && (
-            <Text style={{ color: primaryColor, fontSize: fonts.xs, marginTop: 4 }}>{labels.downloadFailed}</Text>
+            <Text style={{ color: primaryColor, fontSize: fonts.xs, marginTop: 4 }}>
+              {labels.downloadFailed} · {labels.retry}
+            </Text>
           )}
           {state === 'NOT_DOWNLOADED' && (
             <Text style={{ color: primaryColor, fontSize: fonts.xs, marginTop: 4 }}>{labels.download}</Text>
@@ -255,7 +387,9 @@ export function MediaMessageBody({
       </TouchableOpacity>
       {!!caption?.trim() && (
         <View style={styles.captionWrap}>
-          {renderCaption ? renderCaption(caption) : (
+          {renderCaption ? (
+            renderCaption(caption)
+          ) : (
             <Text style={{ color: textColor, fontSize: fonts.md }}>{caption}</Text>
           )}
         </View>
@@ -287,17 +421,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.md,
+    overflow: 'hidden',
   },
-  progressOverlay: {
+  videoPlayOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: BorderRadius.md,
+    backgroundColor: 'rgba(0,0,0,0.15)',
   },
-  progressText: {
-    color: '#fff',
-    fontWeight: '700',
+  center: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   captionWrap: {
     marginTop: Spacing.sm,

@@ -44,13 +44,24 @@ export function buildMediaShareLink(attachmentId: string): string {
 }
 
 export async function getLocalAttachment(
-  attachmentId: string
+  attachmentId: string,
+  expectedStorageKey?: string
 ): Promise<LocalAttachmentRecord | null> {
   const index = await readIndex();
   const row = index[attachmentId];
   if (!row?.localUri) return null;
 
+  if (expectedStorageKey && row.storageKey !== expectedStorageKey) {
+    await invalidateLocalAttachment(attachmentId);
+    return null;
+  }
+
   if (Platform.OS === 'web') {
+    const valid = await isWebBlobUriValid(row.localUri);
+    if (!valid) {
+      await invalidateLocalAttachment(attachmentId);
+      return null;
+    }
     return row;
   }
 
@@ -58,8 +69,7 @@ export async function getLocalAttachment(
     const FileSystem = await import('expo-file-system/legacy');
     const info = await FileSystem.getInfoAsync(row.localUri);
     if (!info.exists) {
-      delete index[attachmentId];
-      await writeIndex(index);
+      await invalidateLocalAttachment(attachmentId);
       return null;
     }
   } catch {
@@ -72,9 +82,34 @@ export async function getLocalAttachment(
 export function resolveAttachmentUrl(attachment: Pick<MessageAttachment, 'storageKey' | 'url'>): string {
   const base = getApiUrl().replace(/\/$/, '');
   if (attachment.storageKey) {
-    return `${base}/uploads/files/${encodeURIComponent(attachment.storageKey)}`;
+    return `${base}/uploads/files?key=${encodeURIComponent(attachment.storageKey)}`;
   }
   return attachment.url || '';
+}
+
+async function isWebBlobUriValid(localUri: string): Promise<boolean> {
+  if (!localUri.startsWith('blob:')) return true;
+  try {
+    const res = await fetch(localUri);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function invalidateLocalAttachment(attachmentId: string): Promise<void> {
+  const index = await readIndex();
+  const row = index[attachmentId];
+  if (!row) return;
+  if (row.localUri?.startsWith('blob:')) {
+    try {
+      URL.revokeObjectURL(row.localUri);
+    } catch {
+      /* ignore */
+    }
+  }
+  delete index[attachmentId];
+  await writeIndex(index);
 }
 
 function authenticatedDownloadUrl(attachment: MessageAttachment): string {
@@ -220,7 +255,7 @@ export async function ensureLocalAttachment(
   onProgress?: ProgressCb,
   signal?: AbortSignal
 ): Promise<LocalAttachmentRecord> {
-  const existing = await getLocalAttachment(attachment.id);
+  const existing = await getLocalAttachment(attachment.id, attachment.storageKey);
   if (existing) {
     onProgress?.(1);
     return existing;

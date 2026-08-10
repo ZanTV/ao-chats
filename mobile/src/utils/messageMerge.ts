@@ -1,6 +1,6 @@
 import type { ChatMessage } from './messages';
 import { isMessageAttachment, type MessageAttachment } from '../attachments/types';
-import { getApiUrl } from '../services/config';
+import { resolveAttachmentUrl } from '../attachments/storage';
 
 /** Merge message fields without letting missing remote attachment wipe a known local one. */
 export function mergeMessageFields(existing: ChatMessage, incoming: ChatMessage): ChatMessage {
@@ -38,10 +38,7 @@ export function coerceAttachment(raw: unknown): MessageAttachment | undefined {
   const a = raw as Partial<MessageAttachment> & { storageKey?: string };
   if (!a.id || !a.storageKey || !a.fileName || !a.mimeType) return undefined;
 
-  const url =
-    typeof a.url === 'string' && a.url.length > 0
-      ? a.url
-      : `${getApiUrl().replace(/\/$/, '')}/uploads/files/${encodeURIComponent(a.storageKey)}`;
+  const url = resolveAttachmentUrl({ storageKey: a.storageKey!, url: a.url ?? '' });
 
   const kind =
     a.kind === 'image' || a.kind === 'video' || a.kind === 'document'

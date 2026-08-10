@@ -10,7 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import type { MessageAttachment } from '../attachments/types';
 import { formatFileSize } from '../attachments/types';
-import { ensureLocalAttachment, getLocalAttachment } from '../attachments/storage';
+import { ensureLocalAttachment, getLocalAttachment, invalidateLocalAttachment } from '../attachments/storage';
 import { BorderRadius, Spacing } from '../theme';
 
 type Props = {
@@ -60,7 +60,7 @@ export function SharedMediaPreview({
       }
 
       try {
-        const cached = await getLocalAttachment(attachment.id);
+        const cached = await getLocalAttachment(attachment.id, attachment.storageKey);
         if (cancelled) return;
         if (cached?.localUri) {
           setLocalUri(cached.localUri);
@@ -147,7 +147,22 @@ export function SharedMediaPreview({
       activeOpacity={0.8}
     >
       {showImage ? (
-        <Image source={{ uri: localUri! }} style={styles.tileImage} resizeMode="cover" />
+        <Image
+          source={{ uri: localUri! }}
+          style={styles.tileImage}
+          resizeMode="cover"
+          onError={() => {
+            setFailed(true);
+            void invalidateLocalAttachment(attachment.id).then(() =>
+              ensureLocalAttachment(attachment)
+                .then((record) => {
+                  setLocalUri(record.localUri);
+                  setFailed(false);
+                })
+                .catch(() => setFailed(true))
+            );
+          }}
+        />
       ) : loading ? (
         <View style={[styles.tileImage, styles.center]}>
           <ActivityIndicator size="small" color={colors.primary} />

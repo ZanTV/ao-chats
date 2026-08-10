@@ -106,6 +106,12 @@ export function isMessageAttachmentLike(value: unknown): value is MessageAttachm
   );
 }
 
+/** Stable authenticated proxy URL — query param avoids slash routing issues for Agrohub keys. */
+export function buildAttachmentProxyUrl(storageKey: string, apiBaseUrl: string): string {
+  const base = apiBaseUrl.replace(/\/$/, '');
+  return `${base}/api/uploads/files?key=${encodeURIComponent(storageKey)}`;
+}
+
 /** Ensure attachment payloads always expose a usable authenticated URL. */
 export function normalizeAttachmentPayload(
   raw: unknown,
@@ -113,10 +119,8 @@ export function normalizeAttachmentPayload(
 ): MessageAttachment | null {
   if (!isMessageAttachmentLike(raw)) return null;
   const a = raw as MessageAttachment;
-  const base = apiBaseUrl.replace(/\/$/, '');
-  const url =
-    typeof a.url === 'string' && a.url.length > 0
-      ? a.url
-      : `${base}/api/uploads/files/${encodeURIComponent(a.storageKey)}`;
-  return { ...a, url };
+  return {
+    ...a,
+    url: buildAttachmentProxyUrl(a.storageKey, apiBaseUrl),
+  };
 }

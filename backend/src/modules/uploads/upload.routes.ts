@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import multer from 'multer';
 import { authenticate, AuthRequest } from '../../middleware/auth';
 import { asyncHandler, AppError } from '../../middleware/errorHandler';
@@ -17,6 +17,33 @@ const upload = multer({
     ),
   },
 });
+
+async function streamStoredFile(req: AuthRequest, res: Response, storageKey: string) {
+  await uploadService.assertCanAccessFile(req.userId!, storageKey);
+
+  const rangeHeader =
+    typeof req.headers.range === 'string' ? req.headers.range : undefined;
+
+  const file = await uploadService.openStoredFile(storageKey, rangeHeader);
+
+  res.status(file.statusCode);
+  res.setHeader('Content-Type', file.mimeType);
+  res.setHeader('Content-Disposition', `inline; filename="${file.fileName.replace(/"/g, '')}"`);
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  if (file.acceptRanges) {
+    res.setHeader('Accept-Ranges', 'bytes');
+  }
+  if (file.contentLength) {
+    res.setHeader('Content-Length', file.contentLength);
+  } else if (file.size != null) {
+    res.setHeader('Content-Length', String(file.size));
+  }
+  if (file.contentRange) {
+    res.setHeader('Content-Range', file.contentRange);
+  }
+
+  file.stream.pipe(res);
+}
 
 router.post(
   '/',
@@ -53,37 +80,27 @@ router.post(
   })
 );
 
+/** Primary download route — slash-safe for Agrohub keys (media/…, documents/…). */
+router.get(
+  '/files',
+  authenticate,
+  asyncHandler(async (req: AuthRequest, res) => {
+    const raw = req.query.key;
+    const storageKey =
+      typeof raw === 'string' ? decodeURIComponent(raw.trim()) : '';
+    if (!storageKey) throw new AppError(400, 'Missing file key');
+    await streamStoredFile(req, res, storageKey);
+  })
+);
+
+/** Legacy path route for older attachment URLs without query param. */
 router.get(
   '/files/:storageKey',
   authenticate,
   asyncHandler(async (req: AuthRequest, res) => {
     const storageKey = decodeURIComponent(String(req.params.storageKey || ''));
     if (!storageKey) throw new AppError(400, 'Missing file key');
-
-    await uploadService.assertCanAccessFile(req.userId!, storageKey);
-
-    const rangeHeader =
-      typeof req.headers.range === 'string' ? req.headers.range : undefined;
-
-    const file = await uploadService.openStoredFile(storageKey, rangeHeader);
-
-    res.status(file.statusCode);
-    res.setHeader('Content-Type', file.mimeType);
-    res.setHeader('Content-Disposition', `inline; filename="${file.fileName.replace(/"/g, '')}"`);
-    res.setHeader('Cache-Control', 'private, max-age=3600');
-    if (file.acceptRanges) {
-      res.setHeader('Accept-Ranges', 'bytes');
-    }
-    if (file.contentLength) {
-      res.setHeader('Content-Length', file.contentLength);
-    } else if (file.size != null) {
-      res.setHeader('Content-Length', String(file.size));
-    }
-    if (file.contentRange) {
-      res.setHeader('Content-Range', file.contentRange);
-    }
-
-    file.stream.pipe(res);
+    await streamStoredFile(req, res, storageKey);
   })
 );
 

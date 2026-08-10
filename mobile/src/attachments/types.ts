@@ -1,5 +1,7 @@
 /** Shared with backend attachment contract — keep fields in sync. */
 
+import { getApiUrl } from '../services/config';
+
 export type AttachmentKind = 'image' | 'video' | 'document';
 
 export interface MessageAttachment {
@@ -59,14 +61,17 @@ export function coerceAttachment(value: unknown): MessageAttachment | null {
         : mime.startsWith('video/')
           ? 'video'
           : 'document';
+  const fileName = typeof a.fileName === 'string' ? a.fileName : 'file';
+  const storageKey = a.storageKey;
+  const base = getApiUrl().replace(/\/$/, '');
   return {
     id: a.id,
-    storageKey: a.storageKey,
-    fileName: typeof a.fileName === 'string' ? a.fileName : 'file',
+    storageKey,
+    fileName,
     mimeType: mime,
     fileSize: typeof a.fileSize === 'number' ? a.fileSize : 0,
     kind,
-    url: typeof a.url === 'string' ? a.url : '',
+    url: `${base}/uploads/files?key=${encodeURIComponent(storageKey)}`,
     width: a.width,
     height: a.height,
     duration: a.duration,

@@ -16,4 +16,5 @@ export {
   saveAttachmentToDevice,
   shareAttachmentFile,
   resolveAttachmentUrl,
+  invalidateLocalAttachment,
 } from './storage';
