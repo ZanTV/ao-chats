@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { Readable } from 'stream';
 import { randomUUID } from 'crypto';
 import { config } from '../../config';
 import { AppError } from '../../middleware/errorHandler';
@@ -13,6 +14,11 @@ import {
   UPLOAD_LIMITS,
   type MessageAttachment,
 } from '../../utils/attachment';
+import {
+  agrohubStorage,
+  attachmentBelongsToConversation,
+  isAgrohubChatStorageKey,
+} from './agrohubStorage.client';
 
 const UPLOAD_ROOT = path.resolve(process.cwd(), 'uploads');
 
@@ -31,7 +37,51 @@ export function resolveUploadPath(storageKey: string): string {
   return full;
 }
 
+function proxyAttachmentUrl(storageKey: string): string {
+  const publicPath = `/api/uploads/files/${encodeURIComponent(storageKey)}`;
+  const base = config.apiUrl.replace(/\/$/, '');
+  return `${base}${publicPath}`;
+}
+
+function mimeFromFileName(fileName: string): string {
+  const ext = path.extname(fileName).toLowerCase();
+  const mimeByExt: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.mp4': 'video/mp4',
+    '.mov': 'video/quicktime',
+    '.webm': 'video/webm',
+    '.pdf': 'application/pdf',
+    '.txt': 'text/plain',
+    '.zip': 'application/zip',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  };
+  return mimeByExt[ext] || 'application/octet-stream';
+}
+
+function localFileExists(storageKey: string): boolean {
+  try {
+    const full = resolveUploadPath(storageKey);
+    return fs.existsSync(full);
+  } catch {
+    return false;
+  }
+}
+
 export class UploadService {
+  /**
+   * Persist a chat attachment.
+   * When MEDIA_STORAGE_PROVIDER=agrohub, uploads to storage.agrohub.ltd.
+   * Otherwise writes to local uploads/ (legacy).
+   */
   async saveLocalUpload(params: {
     uploaderId: string;
     buffer: Buffer;
@@ -39,6 +89,7 @@ export class UploadService {
     mimeType: string;
     width?: number;
     height?: number;
+    conversationId?: string;
   }): Promise<MessageAttachment> {
     const mime = (params.mimeType || 'application/octet-stream').toLowerCase();
     if (!isAllowedMime(mime)) {
@@ -52,6 +103,86 @@ export class UploadService {
       throw new AppError(400, 'Empty file.');
     }
 
+    if (config.mediaStorage.provider === 'agrohub') {
+      return this.saveAgrohubChatUpload(params, mime);
+    }
+
+    return this.saveLegacyDiskUpload(params, mime);
+  }
+
+  private async saveAgrohubChatUpload(
+    params: {
+      uploaderId: string;
+      buffer: Buffer;
+      originalName: string;
+      mimeType: string;
+      width?: number;
+      height?: number;
+      conversationId?: string;
+    },
+    mime: string
+  ): Promise<MessageAttachment> {
+    const conversationId = String(params.conversationId || '').trim();
+    if (!conversationId) {
+      throw new AppError(
+        400,
+        'conversationId is required for media upload.',
+        'CONVERSATION_ID_REQUIRED'
+      );
+    }
+
+    const participant = await prisma.participant.findUnique({
+      where: {
+        conversationId_userId: { conversationId, userId: params.uploaderId },
+      },
+      select: { id: true },
+    });
+    if (!participant) {
+      throw new AppError(403, 'Not a participant');
+    }
+
+    const safeName = sanitizeFileName(params.originalName);
+    const uploaded = await agrohubStorage.uploadChatFile({
+      conversationId,
+      buffer: params.buffer,
+      fileName: safeName,
+      mimeType: mime,
+    });
+
+    if (!isAgrohubChatStorageKey(uploaded.storageKey)) {
+      throw new AppError(502, 'Media storage returned an invalid key.', 'STORAGE_BAD_KEY');
+    }
+    if (!attachmentBelongsToConversation(uploaded.storageKey, conversationId)) {
+      throw new AppError(502, 'Media storage returned an invalid key.', 'STORAGE_BAD_KEY');
+    }
+
+    const id = randomUUID();
+    const kind = kindFromMime(mime);
+
+    return {
+      id,
+      kind,
+      mimeType: mime,
+      fileName: safeName,
+      fileSize: params.buffer.length,
+      storageKey: uploaded.storageKey,
+      url: proxyAttachmentUrl(uploaded.storageKey),
+      width: params.width,
+      height: params.height,
+    };
+  }
+
+  private async saveLegacyDiskUpload(
+    params: {
+      uploaderId: string;
+      buffer: Buffer;
+      originalName: string;
+      mimeType: string;
+      width?: number;
+      height?: number;
+    },
+    mime: string
+  ): Promise<MessageAttachment> {
     ensureUploadRoot();
     const id = randomUUID();
     const kind = kindFromMime(mime);
@@ -61,9 +192,6 @@ export class UploadService {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, params.buffer);
 
-    const publicPath = `/api/uploads/files/${encodeURIComponent(storageKey)}`;
-    const base = config.apiUrl.replace(/\/$/, '');
-
     return {
       id,
       kind,
@@ -71,7 +199,7 @@ export class UploadService {
       fileName: safeName,
       fileSize: params.buffer.length,
       storageKey,
-      url: `${base}${publicPath}`,
+      url: proxyAttachmentUrl(storageKey),
       width: params.width,
       height: params.height,
     };
@@ -79,6 +207,7 @@ export class UploadService {
 
   /**
    * Persist a custom profile photo under profiles/{userId}/… (not chat attachments).
+   * Profile → Agrohub integration is intentionally deferred.
    */
   async saveProfileAvatar(params: {
     uploaderId: string;
@@ -105,19 +234,16 @@ export class UploadService {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, params.buffer);
 
-    const publicPath = `/api/uploads/files/${encodeURIComponent(storageKey)}`;
-    const base = config.apiUrl.replace(/\/$/, '');
-
     return {
       storageKey,
-      url: `${base}${publicPath}`,
+      url: proxyAttachmentUrl(storageKey),
       mimeType: mime,
       fileSize: params.buffer.length,
     };
   }
 
   async assertCanAccessFile(userId: string, storageKey: string): Promise<void> {
-    // Owner chat uploads
+    // Owner chat uploads (legacy local keys)
     if (storageKey.startsWith(`${userId}/`)) return;
 
     // Profile photos: owner or any authenticated user who is not in a block relationship
@@ -141,6 +267,24 @@ export class UploadService {
       return;
     }
 
+    // Agrohub chat keys: conversation participant who already has (or will have) the attachment
+    // referenced on a message, OR participant of the conversationId embedded in the key
+    // (needed briefly between upload and message create).
+    if (isAgrohubChatStorageKey(storageKey)) {
+      const parts = storageKey.replace(/\\/g, '/').split('/');
+      // media/{conversationId}/… OR documents/{conversationId}/…
+      const conversationId = parts[1];
+      if (conversationId) {
+        const participant = await prisma.participant.findUnique({
+          where: {
+            conversationId_userId: { conversationId, userId },
+          },
+          select: { id: true },
+        });
+        if (participant) return;
+      }
+    }
+
     const rows = await prisma.$queryRaw<{ ok: number }[]>`
       SELECT 1 AS ok
       FROM messages m
@@ -155,37 +299,148 @@ export class UploadService {
     }
   }
 
+  /**
+   * Existence check used by MessageService — no re-upload.
+   * Dual-read: Agrohub chat keys → storage API; legacy → local disk.
+   */
+  async assertAttachmentBlobExists(
+    storageKey: string,
+    expectedSize?: number
+  ): Promise<void> {
+    if (isAgrohubChatStorageKey(storageKey)) {
+      await agrohubStorage.assertObjectExists(storageKey);
+      return;
+    }
+
+    // profiles/ dual-read: prefer local (current profile uploads), else Agrohub
+    if (storageKey.startsWith('profiles/')) {
+      if (localFileExists(storageKey)) {
+        if (expectedSize != null) {
+          const full = resolveUploadPath(storageKey);
+          const stat = fs.statSync(full);
+          if (stat.size !== expectedSize) {
+            throw new AppError(400, 'Upload failed. Try again.');
+          }
+        }
+        return;
+      }
+      await agrohubStorage.assertObjectExists(storageKey);
+      return;
+    }
+
+    const full = resolveUploadPath(storageKey);
+    if (!fs.existsSync(full)) {
+      throw new AppError(400, 'Upload failed. Try again.');
+    }
+    if (expectedSize != null) {
+      const stat = fs.statSync(full);
+      if (stat.size !== expectedSize) {
+        throw new AppError(400, 'Upload failed. Try again.');
+      }
+    }
+  }
+
   getFileStream(storageKey: string) {
     const full = resolveUploadPath(storageKey);
     if (!fs.existsSync(full)) {
       throw new AppError(404, 'File not found');
     }
     const fileName = path.basename(full);
-    const ext = path.extname(fileName).toLowerCase();
-    const mimeByExt: Record<string, string> = {
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.webp': 'image/webp',
-      '.gif': 'image/gif',
-      '.mp4': 'video/mp4',
-      '.mov': 'video/quicktime',
-      '.webm': 'video/webm',
-      '.pdf': 'application/pdf',
-      '.txt': 'text/plain',
-      '.zip': 'application/zip',
-      '.doc': 'application/msword',
-      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      '.xls': 'application/vnd.ms-excel',
-      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      '.ppt': 'application/vnd.ms-powerpoint',
-      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    };
     return {
       stream: fs.createReadStream(full),
       size: fs.statSync(full).size,
-      mimeType: mimeByExt[ext] || 'application/octet-stream',
+      mimeType: mimeFromFileName(fileName),
       fileName,
+    };
+  }
+
+  /**
+   * Open a stored file for authenticated download.
+   * Dual-read: local disk for legacy keys; Agrohub signed fetch for media/documents
+   * (and profiles/ only when missing locally).
+   */
+  async openStoredFile(
+    storageKey: string,
+    rangeHeader?: string
+  ): Promise<{
+    stream: NodeJS.ReadableStream;
+    statusCode: number;
+    mimeType: string;
+    fileName: string;
+    size?: number;
+    contentLength?: string;
+    contentRange?: string;
+    acceptRanges?: boolean;
+  }> {
+    // Dual-read:
+    // - media/ + documents/ → Agrohub
+    // - profiles/ → local if present (current profile uploads), else Agrohub
+    // - everything else → local legacy
+    const preferAgrohub =
+      isAgrohubChatStorageKey(storageKey) ||
+      (storageKey.startsWith('profiles/') && !localFileExists(storageKey));
+
+    if (!preferAgrohub) {
+      const local = this.getFileStream(storageKey);
+      if (rangeHeader) {
+        const ranged = this.openLocalRange(storageKey, local, rangeHeader);
+        if (ranged) return ranged;
+      }
+      return {
+        stream: local.stream,
+        statusCode: 200,
+        mimeType: local.mimeType,
+        fileName: local.fileName,
+        size: local.size,
+        contentLength: String(local.size),
+        acceptRanges: true,
+      };
+    }
+
+    const remote = await agrohubStorage.fetchObject(storageKey, rangeHeader);
+    if (!remote.body) {
+      throw new AppError(502, 'Could not download media.');
+    }
+    const fileName = path.basename(storageKey) || 'file';
+    return {
+      stream: Readable.fromWeb(remote.body as import('stream/web').ReadableStream),
+      statusCode: remote.status === 206 ? 206 : 200,
+      mimeType: remote.contentType || mimeFromFileName(fileName),
+      fileName,
+      contentLength: remote.contentLength || undefined,
+      contentRange: remote.contentRange || undefined,
+      acceptRanges: true,
+    };
+  }
+
+  private openLocalRange(
+    storageKey: string,
+    local: { stream: fs.ReadStream; size: number; mimeType: string; fileName: string },
+    rangeHeader: string
+  ) {
+    const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
+    if (!match) return null;
+    const size = local.size;
+    let start = match[1] ? parseInt(match[1], 10) : 0;
+    let end = match[2] ? parseInt(match[2], 10) : size - 1;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end >= size || start > end) {
+      local.stream.destroy();
+      throw new AppError(416, 'Requested range not satisfiable');
+    }
+    // Recreate stream with range — destroy unused full stream
+    local.stream.destroy();
+    const full = resolveUploadPath(storageKey);
+    const stream = fs.createReadStream(full, { start, end });
+    const chunkSize = end - start + 1;
+    return {
+      stream,
+      statusCode: 206,
+      mimeType: local.mimeType,
+      fileName: local.fileName,
+      size: chunkSize,
+      contentLength: String(chunkSize),
+      contentRange: `bytes ${start}-${end}/${size}`,
+      acceptRanges: true,
     };
   }
 }

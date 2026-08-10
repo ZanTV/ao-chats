@@ -28,6 +28,9 @@ router.post(
 
     const width = req.body?.width ? parseInt(String(req.body.width), 10) : undefined;
     const height = req.body?.height ? parseInt(String(req.body.height), 10) : undefined;
+    const conversationId = req.body?.conversationId
+      ? String(req.body.conversationId).trim()
+      : undefined;
 
     try {
       const attachment = await uploadService.saveLocalUpload({
@@ -37,6 +40,7 @@ router.post(
         mimeType: file.mimetype,
         width: Number.isFinite(width) ? width : undefined,
         height: Number.isFinite(height) ? height : undefined,
+        conversationId,
       });
       res.status(201).json({ attachment });
     } catch (err) {
@@ -57,12 +61,29 @@ router.get(
     if (!storageKey) throw new AppError(400, 'Missing file key');
 
     await uploadService.assertCanAccessFile(req.userId!, storageKey);
-    const { stream, size, mimeType, fileName } = uploadService.getFileStream(storageKey);
-    res.setHeader('Content-Type', mimeType);
-    res.setHeader('Content-Length', String(size));
-    res.setHeader('Content-Disposition', `inline; filename="${fileName.replace(/"/g, '')}"`);
+
+    const rangeHeader =
+      typeof req.headers.range === 'string' ? req.headers.range : undefined;
+
+    const file = await uploadService.openStoredFile(storageKey, rangeHeader);
+
+    res.status(file.statusCode);
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${file.fileName.replace(/"/g, '')}"`);
     res.setHeader('Cache-Control', 'private, max-age=3600');
-    stream.pipe(res);
+    if (file.acceptRanges) {
+      res.setHeader('Accept-Ranges', 'bytes');
+    }
+    if (file.contentLength) {
+      res.setHeader('Content-Length', file.contentLength);
+    } else if (file.size != null) {
+      res.setHeader('Content-Length', String(file.size));
+    }
+    if (file.contentRange) {
+      res.setHeader('Content-Range', file.contentRange);
+    }
+
+    file.stream.pipe(res);
   })
 );
 

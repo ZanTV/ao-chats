@@ -104,6 +104,18 @@ export function validateEnvironment(
     warnings.push('OBJECT_STORAGE_BUCKET is not set (optional until file uploads are enabled)');
   }
 
+  const mediaProvider = (getEnv('MEDIA_STORAGE_PROVIDER') || 'local').toLowerCase();
+  if (mediaProvider === 'agrohub' && !getEnv('STORAGE_API_SECRET')) {
+    warnings.push(
+      'MEDIA_STORAGE_PROVIDER=agrohub but STORAGE_API_SECRET is not set (chat uploads will fail)'
+    );
+  }
+  if (mediaProvider !== 'local' && mediaProvider !== 'agrohub') {
+    warnings.push(
+      `MEDIA_STORAGE_PROVIDER="${mediaProvider}" is unknown (expected local or agrohub)`
+    );
+  }
+
   const localhostViolations = isProduction
     ? findLocalhostViolations(PRODUCTION_NO_LOCALHOST)
     : [];

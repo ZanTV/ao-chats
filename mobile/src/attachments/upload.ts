@@ -15,11 +15,18 @@ export type UploadProgress = {
  */
 export function uploadAttachment(
   file: PendingAttachment,
+  conversationId: string,
   onProgress?: (p: UploadProgress) => void,
   signal?: AbortSignal
 ): Promise<MessageAttachment> {
   return new Promise(async (resolve, reject) => {
     try {
+      const convId = conversationId.trim();
+      if (!convId) {
+        reject(new ApiError('Upload failed. Try again.', 'INVALID_CONVERSATION'));
+        return;
+      }
+
       const token = await getAccessToken();
       if (!token) {
         reject(new ApiError("You don't have permission to upload this file.", 'UNAUTHORIZED'));
@@ -77,6 +84,12 @@ export function uploadAttachment(
         reject(new ApiError('Upload cancelled', 'CANCELLED'));
       };
 
+      const appendMetaFields = (form: FormData) => {
+        form.append('conversationId', convId);
+        if (file.width) form.append('width', String(file.width));
+        if (file.height) form.append('height', String(file.height));
+      };
+
       const form = new FormData();
       const blobPart: any = {
         uri: file.localUri,
@@ -89,8 +102,7 @@ export function uploadAttachment(
           .then((r) => r.blob())
           .then((blob) => {
             form.append('file', blob, file.fileName);
-            if (file.width) form.append('width', String(file.width));
-            if (file.height) form.append('height', String(file.height));
+            appendMetaFields(form);
             xhr.send(form);
           })
           .catch(() => reject(new ApiError('Upload failed. Try again.', 'NETWORK_ERROR')));
@@ -98,8 +110,7 @@ export function uploadAttachment(
       }
 
       form.append('file', blobPart);
-      if (file.width) form.append('width', String(file.width));
-      if (file.height) form.append('height', String(file.height));
+      appendMetaFields(form);
       xhr.send(form);
     } catch (err) {
       reject(err instanceof Error ? err : new ApiError('Upload failed. Try again.', 'UPLOAD_FAILED'));

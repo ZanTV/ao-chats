@@ -763,6 +763,7 @@ export default function ChatScreen() {
       try {
         const uploaded = await uploadAttachment(
           pending,
+          conversationId,
           (p) => setUploadPercent(p.percent),
           controller.signal
         );

@@ -21,8 +21,11 @@ import {
   sanitizeFileName,
   type MessageAttachment,
 } from '../../utils/attachment';
-import { resolveUploadPath } from '../uploads/upload.service';
-import fs from 'fs';
+import { uploadService } from '../uploads/upload.service';
+import {
+  attachmentBelongsToConversation,
+  isAgrohubChatStorageKey,
+} from '../uploads/agrohubStorage.client';
 
 const replyToSelect = {
   id: true,
@@ -78,12 +81,13 @@ function messageVisibilityWhere(
 }
 
 export class MessageService {
-  private validateAttachmentForSender(
+  private async validateAttachmentForSender(
     senderId: string,
+    conversationId: string,
     raw: MessageAttachment | undefined,
     type: 'TEXT' | 'IMAGE' | 'FILE',
     options?: { allowExistingOwnedFile?: boolean }
-  ): MessageAttachment | null {
+  ): Promise<MessageAttachment | null> {
     if (!raw) {
       if (type === 'IMAGE' || type === 'FILE') {
         throw new AppError(400, 'Attachment is required for media messages');
@@ -91,8 +95,20 @@ export class MessageService {
       return null;
     }
 
-    if (!options?.allowExistingOwnedFile && !raw.storageKey.startsWith(`${senderId}/`)) {
-      throw new AppError(403, "You don't have permission to upload this file.");
+    const key = String(raw.storageKey || '').replace(/\\/g, '/');
+    if (!key) {
+      throw new AppError(400, 'Attachment is required for media messages');
+    }
+
+    // Ownership: legacy keys are uploader-prefixed; Agrohub keys are conversation-scoped.
+    if (!options?.allowExistingOwnedFile) {
+      if (isAgrohubChatStorageKey(key)) {
+        if (!attachmentBelongsToConversation(key, conversationId)) {
+          throw new AppError(403, "You don't have permission to upload this file.");
+        }
+      } else if (!key.startsWith(`${senderId}/`)) {
+        throw new AppError(403, "You don't have permission to upload this file.");
+      }
     }
 
     const mime = String(raw.mimeType || '').toLowerCase();
@@ -110,14 +126,12 @@ export class MessageService {
       throw new AppError(400, 'This file is too large to upload.');
     }
 
-    const full = resolveUploadPath(raw.storageKey);
-    if (!fs.existsSync(full)) {
-      throw new AppError(400, 'Upload failed. Try again.');
-    }
-    const stat = fs.statSync(full);
-    if (stat.size !== raw.fileSize) {
-      throw new AppError(400, 'Upload failed. Try again.');
-    }
+    // Dual-read existence: Agrohub via storage API, legacy via local disk.
+    // Does not re-upload — only verifies the blob from the prior POST /api/uploads.
+    await uploadService.assertAttachmentBlobExists(
+      key,
+      isAgrohubChatStorageKey(key) ? undefined : raw.fileSize
+    );
 
     return {
       id: raw.id,
@@ -125,7 +139,7 @@ export class MessageService {
       mimeType: mime,
       fileName: sanitizeFileName(raw.fileName),
       fileSize: raw.fileSize,
-      storageKey: raw.storageKey,
+      storageKey: key,
       url: raw.url,
       width: raw.width,
       height: raw.height,
@@ -168,8 +182,9 @@ export class MessageService {
       if (!replyMsg) throw new AppError(400, 'Reply message not found');
     }
 
-    const attachment = this.validateAttachmentForSender(
+    const attachment = await this.validateAttachmentForSender(
       senderId,
+      conversationId,
       options?.attachment ?? undefined,
       type,
       { allowExistingOwnedFile: Boolean(options?.isForwarded) }
