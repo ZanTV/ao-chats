@@ -14,6 +14,8 @@ interface BlockedUser {
   firstName: string;
   lastName: string;
   avatarId: string;
+  avatarUrl?: string | null;
+  avatarVersion?: number;
 }
 
 export default function BlockedUsersScreen() {
@@ -56,7 +58,13 @@ export default function BlockedUsersScreen() {
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View style={[styles.item, { backgroundColor: colors.surface }]}>
-            <Avatar avatarId={item.avatarId} size={44} />
+            <Avatar
+              userId={item.id}
+              avatarId={item.avatarId}
+              imageUrl={item.avatarUrl}
+              imageVersion={item.avatarVersion}
+              size={44}
+            />
             <View style={styles.itemContent}>
               <Text style={[styles.itemName, { color: colors.text, fontSize: fonts.md }]}>
                 {item.firstName} {item.lastName}

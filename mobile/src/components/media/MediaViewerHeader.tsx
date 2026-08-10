@@ -7,7 +7,10 @@ import { Spacing } from '../../theme';
 interface Props {
   title: string;
   subtitle?: string;
+  userId?: string;
   avatarId?: string;
+  imageUrl?: string | null;
+  imageVersion?: number | null;
   onBack: () => void;
   onMore: () => void;
   colors: {
@@ -22,7 +25,10 @@ interface Props {
 export function MediaViewerHeader({
   title,
   subtitle,
+  userId,
   avatarId,
+  imageUrl,
+  imageVersion,
   onBack,
   onMore,
   colors,
@@ -33,7 +39,15 @@ export function MediaViewerHeader({
       <TouchableOpacity onPress={onBack} style={styles.back} hitSlop={10} accessibilityRole="button">
         <Ionicons name="arrow-back" size={22} color={colors.text} />
       </TouchableOpacity>
-      {avatarId ? <Avatar avatarId={avatarId} size={36} /> : null}
+      {avatarId ? (
+        <Avatar
+          userId={userId}
+          avatarId={avatarId}
+          imageUrl={imageUrl}
+          imageVersion={imageVersion}
+          size={36}
+        />
+      ) : null}
       <View style={styles.meta}>
         <Text style={{ color: colors.text, fontSize: fonts.md, fontWeight: '700' }} numberOfLines={1}>
           {title}

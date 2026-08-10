@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { normalizeAvatarUrl } from '../utils/avatarUrl';
 
 export type AvatarSyncEntry = {
   avatarUrl: string | null;
@@ -65,12 +66,13 @@ export const useAvatarSyncStore = create<AvatarSyncState>((set, get) => ({
       return true;
     }
 
-    // Explicit URL (string or null for clear)
+    // Explicit URL (string or null for clear) — empty/whitespace → null (AO fallback)
+    const nextUrl = avatarUrl === null ? null : normalizeAvatarUrl(avatarUrl);
     if (
       prev &&
       version === prev.avatarVersion &&
       prev.urlKnown &&
-      prev.avatarUrl === avatarUrl
+      prev.avatarUrl === nextUrl
     ) {
       return false;
     }
@@ -80,7 +82,7 @@ export const useAvatarSyncStore = create<AvatarSyncState>((set, get) => ({
       byUserId: {
         ...state.byUserId,
         [id]: {
-          avatarUrl,
+          avatarUrl: nextUrl,
           avatarVersion: version,
           urlKnown: true,
           updatedAt: Date.now(),
@@ -112,7 +114,10 @@ export function applyAvatarSyncUpdate(input: {
   return useAvatarSyncStore.getState().apply(input);
 }
 
-/** Resolve effective avatar projection for rendering. */
+/**
+ * Single precedence rule: valid avatarUrl (sync or props) wins over avatarId.
+ * Callers still pass avatarId separately for AO fallback rendering.
+ */
 export function resolveAvatarProjection(
   userId: string | null | undefined,
   imageUrl: string | null | undefined,
@@ -122,7 +127,7 @@ export function resolveAvatarProjection(
     typeof imageVersion === 'number' && Number.isFinite(imageVersion)
       ? imageVersion
       : 0;
-  const propUrl = imageUrl ?? null;
+  const propUrl = normalizeAvatarUrl(imageUrl);
   const id = String(userId || '').trim();
   if (!id) {
     return { avatarUrl: propUrl, avatarVersion: propVersion };
@@ -131,11 +136,11 @@ export function resolveAvatarProjection(
   if (!synced || !synced.urlKnown) {
     return { avatarUrl: propUrl, avatarVersion: propVersion };
   }
-  if (synced.avatarVersion > propVersion) {
-    return { avatarUrl: synced.avatarUrl, avatarVersion: synced.avatarVersion };
-  }
-  if (synced.avatarVersion === propVersion) {
-    return { avatarUrl: synced.avatarUrl, avatarVersion: synced.avatarVersion };
+  if (synced.avatarVersion >= propVersion) {
+    return {
+      avatarUrl: normalizeAvatarUrl(synced.avatarUrl),
+      avatarVersion: synced.avatarVersion,
+    };
   }
   return { avatarUrl: propUrl, avatarVersion: propVersion };
 }

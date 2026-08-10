@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import { setPendingAvatarPhoto } from '../../src/profile/pendingAvatarPhoto';
 import { kindFromMimeClient, validatePendingAttachment } from '../../src/attachments/pending';
 import { invalidatePublicProfile, setCachedPublicProfile } from '../../src/cache/profileCache';
 import { applyAvatarSyncUpdate } from '../../src/profile/avatarSyncStore';
+import { hasValidAvatarUrl } from '../../src/utils/avatarUrl';
 import { ProfileSaveSuccessToast } from '../../src/components/ProfileSaveSuccessToast';
 import { Spacing, BorderRadius } from '../../src/theme';
 
@@ -73,8 +74,16 @@ export default function EditProfileScreen() {
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [needsAvatarPick, setNeedsAvatarPick] = useState(false);
   const [avatarTouched, setAvatarTouched] = useState(false);
-  /** After remove / selecting AO avatar, preview emoji instead of stale custom URL */
-  const [preferEmojiPreview, setPreferEmojiPreview] = useState(false);
+  /**
+   * When true, preview the selected AO avatar instead of a real photo.
+   * Only set after remove-photo or picking an AO avatar (which clears photo on save).
+   * Default/current profile state always prefers a valid avatarUrl.
+   */
+  const [previewAoAvatar, setPreviewAoAvatar] = useState(
+    () => !hasValidAvatarUrl(user?.avatarUrl)
+  );
+  /** Draft AO selection should not be wiped by a same-URL profile refresh. */
+  const aoDraftPreviewRef = useRef(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
 
   useEffect(() => {
@@ -82,12 +91,21 @@ export default function EditProfileScreen() {
     loadUniversities().then(setUniversities);
   }, []);
 
+  // Keep preview aligned with authoritative profile photo (upload/clear/sync)
   useEffect(() => {
-    if (!user?.avatarUrl) setPreferEmojiPreview(true);
-    else setPreferEmojiPreview(false);
-  }, [user?.avatarUrl]);
+    if (hasValidAvatarUrl(user?.avatarUrl)) {
+      if (aoDraftPreviewRef.current) return;
+      setPreviewAoAvatar(false);
+    } else {
+      aoDraftPreviewRef.current = false;
+      setPreviewAoAvatar(true);
+    }
+  }, [user?.avatarUrl, user?.avatarVersion]);
+
+  const showRealPhotoPreview = hasValidAvatarUrl(user?.avatarUrl) && !previewAoAvatar;
 
   const pickProfilePhoto = async () => {
+    aoDraftPreviewRef.current = false;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
       Alert.alert(t.common.error, "You don't have permission to access photos.");
@@ -121,7 +139,7 @@ export default function EditProfileScreen() {
   };
 
   const confirmRemoveCustomPhoto = async () => {
-    if (!user?.avatarUrl || clearingPhoto) return;
+    if (!hasValidAvatarUrl(user?.avatarUrl) || clearingPhoto) return;
     setClearingPhoto(true);
     try {
       const updated = (await api.clearProfileAvatar()) as Parameters<typeof updateUser>[0];
@@ -143,9 +161,10 @@ export default function EditProfileScreen() {
           avatarVersion: updated.avatarVersion,
         });
       }
-      setPreferEmojiPreview(true);
+      setPreviewAoAvatar(true);
       setNeedsAvatarPick(true);
       setAvatarTouched(false);
+      aoDraftPreviewRef.current = false;
       setShowRemoveConfirm(false);
       Alert.alert('', t.profile.photoRemoved);
     } catch (err) {
@@ -158,7 +177,9 @@ export default function EditProfileScreen() {
   const selectAoAvatar = (id: string) => {
     setSelectedAvatarId(id);
     setAvatarTouched(true);
-    setPreferEmojiPreview(true);
+    // Selecting AO avatar previews AO and will clear avatarUrl on save
+    aoDraftPreviewRef.current = true;
+    setPreviewAoAvatar(true);
   };
 
   const hasChanges =
@@ -226,6 +247,14 @@ export default function EditProfileScreen() {
       updateUser(updated as Parameters<typeof updateUser>[0]);
       if (typeof updated.id === 'string') {
         invalidatePublicProfile(updated.id);
+        applyAvatarSyncUpdate({
+          userId: updated.id,
+          avatarUrl: (updated.avatarUrl as string | null | undefined) ?? null,
+          avatarVersion:
+            typeof updated.avatarVersion === 'number'
+              ? updated.avatarVersion
+              : user?.avatarVersion ?? 0,
+        });
       }
       const refreshed = await loadUser();
       if (!refreshed) {
@@ -233,6 +262,8 @@ export default function EditProfileScreen() {
       }
       setNeedsAvatarPick(false);
       setAvatarTouched(false);
+      aoDraftPreviewRef.current = false;
+      setPreviewAoAvatar(!hasValidAvatarUrl((updated as { avatarUrl?: string | null }).avatarUrl));
       setShowSaveSuccess(true);
     } catch (err) {
       const message =
@@ -263,9 +294,9 @@ export default function EditProfileScreen() {
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.avatarSection}>
             <Avatar
-              userId={preferEmojiPreview ? undefined : user?.id}
+              userId={showRealPhotoPreview ? user?.id : undefined}
               avatarId={selectedAvatarId}
-              imageUrl={preferEmojiPreview ? null : user?.avatarUrl}
+              imageUrl={showRealPhotoPreview ? user?.avatarUrl : null}
               imageVersion={user?.avatarVersion}
               size={88}
             />
@@ -278,7 +309,7 @@ export default function EditProfileScreen() {
                 {t.profile.changePhoto}
               </Text>
             </TouchableOpacity>
-            {user?.avatarUrl && !preferEmojiPreview ? (
+            {showRealPhotoPreview ? (
               <TouchableOpacity
                 onPress={() => setShowRemoveConfirm(true)}
                 disabled={clearingPhoto}
@@ -299,7 +330,7 @@ export default function EditProfileScreen() {
                 },
               ]}
             >
-              {needsAvatarPick || !user?.avatarUrl || preferEmojiPreview
+              {needsAvatarPick || !showRealPhotoPreview
                 ? t.profile.chooseAvatar
                 : t.profile.useAoAvatar}
             </Text>

@@ -31,6 +31,8 @@ router.get(
         firstName: string;
         lastName: string;
         avatarId: string;
+        avatarUrl: string | null;
+        avatarVersion: number | null;
       }>
     >`
       SELECT
@@ -43,7 +45,9 @@ router.get(
         m.attachment AS attachment,
         u.first_name AS "firstName",
         u.last_name AS "lastName",
-        u.avatar_id AS "avatarId"
+        u.avatar_id AS "avatarId",
+        u.avatar_url AS "avatarUrl",
+        u.avatar_version AS "avatarVersion"
       FROM messages m
       INNER JOIN participants p ON p.conversation_id = m.conversation_id
       INNER JOIN users u ON u.id = m.sender_id
@@ -98,6 +102,8 @@ router.get(
           firstName: row.firstName,
           lastName: row.lastName,
           avatarId: row.avatarId,
+          avatarUrl: row.avatarUrl,
+          avatarVersion: row.avatarVersion ?? 0,
         },
       },
       gallery,

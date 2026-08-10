@@ -216,7 +216,13 @@ export function NotificationPanel() {
       activeOpacity={0.75}
     >
       {item.actor ? (
-        <Avatar avatarId={item.actor.avatarId} size={48} />
+        <Avatar
+          userId={item.actor.id}
+          avatarId={item.actor.avatarId}
+          imageUrl={item.actor.avatarUrl}
+          imageVersion={item.actor.avatarVersion}
+          size={48}
+        />
       ) : (
         <View style={[styles.iconCircle, { backgroundColor: colors.primary + '15' }]}>
           <Ionicons name={iconForType(item.type)} size={22} color={colors.primary} />

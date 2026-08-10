@@ -21,7 +21,8 @@ import {
   setCachedPublicProfile,
   type PublicProfileCache,
 } from '../../src/cache/profileCache';
-import { bustAvatarUrl } from '../../src/utils/avatarUrl';
+import { bustAvatarUrl, hasValidAvatarUrl } from '../../src/utils/avatarUrl';
+import { useAvatarSyncStore } from '../../src/profile/avatarSyncStore';
 import { Spacing } from '../../src/theme';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -105,11 +106,22 @@ export default function ProfilePhotoViewScreen() {
     };
   }, [userId, me?.id]);
 
-  const displayUrl = bustAvatarUrl(profile?.avatarUrl, profile?.avatarVersion);
+  const synced = useAvatarSyncStore((s) => (userId ? s.byUserId[userId] : undefined));
+  const resolvedUrl =
+    synced?.urlKnown && typeof synced.avatarVersion === 'number'
+      ? synced.avatarVersion >= (profile?.avatarVersion ?? 0)
+        ? synced.avatarUrl
+        : profile?.avatarUrl
+      : profile?.avatarUrl;
+  const resolvedVersion =
+    synced?.urlKnown && synced.avatarVersion >= (profile?.avatarVersion ?? 0)
+      ? synced.avatarVersion
+      : profile?.avatarVersion;
+  const displayUrl = bustAvatarUrl(resolvedUrl, resolvedVersion);
 
   useEffect(() => {
     setImageFailed(false);
-    if (!displayUrl) {
+    if (!hasValidAvatarUrl(displayUrl)) {
       setAuthHeaders(undefined);
       return;
     }
@@ -130,7 +142,7 @@ export default function ProfilePhotoViewScreen() {
     );
   }
 
-  const showPhoto = Boolean(displayUrl) && !imageFailed;
+  const showPhoto = hasValidAvatarUrl(displayUrl) && !imageFailed;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: '#0B0B0C' }]} edges={['top', 'bottom']}>
@@ -160,7 +172,12 @@ export default function ProfilePhotoViewScreen() {
             onError={() => setImageFailed(true)}
           />
         ) : (
-          <Avatar avatarId={profile.avatarId || 'avatar-1'} size={Math.min(SCREEN_W * 0.55, 220)} />
+          <Avatar
+            userId={profile.id}
+            avatarId={profile.avatarId || 'avatar-1'}
+            imageUrl={null}
+            size={Math.min(SCREEN_W * 0.55, 220)}
+          />
         )}
       </View>
 

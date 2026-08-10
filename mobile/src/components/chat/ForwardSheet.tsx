@@ -17,6 +17,8 @@ interface Friend {
   firstName: string;
   lastName: string;
   avatarId: string;
+  avatarUrl?: string | null;
+  avatarVersion?: number;
   username: string;
 }
 
@@ -98,7 +100,13 @@ export function ForwardSheet({ visible, messageId, title, onClose, onForwarded, 
                     style={[styles.row, { backgroundColor: isSelected ? colors.primary + '12' : colors.surface }]}
                     onPress={() => toggle(item.id)}
                   >
-                    <Avatar avatarId={item.avatarId} size={40} />
+                    <Avatar
+                      userId={item.id}
+                      avatarId={item.avatarId}
+                      imageUrl={item.avatarUrl}
+                      imageVersion={item.avatarVersion}
+                      size={40}
+                    />
                     <View style={styles.rowText}>
                       <Text style={{ color: colors.text, fontWeight: '600', fontSize: fonts.sm }}>
                         {item.firstName} {item.lastName}

@@ -43,6 +43,8 @@ type MediaPayload = {
     firstName: string;
     lastName: string;
     avatarId: string;
+    avatarUrl?: string | null;
+    avatarVersion?: number;
   };
 };
 
@@ -227,6 +229,9 @@ export default function MediaViewerScreen() {
             : undefined
         }
         avatarId={media?.sender.avatarId}
+        userId={media?.sender.id}
+        imageUrl={media?.sender.avatarUrl}
+        imageVersion={media?.sender.avatarVersion}
         onBack={onBack}
         onMore={() => setShowActions(true)}
         colors={headerColors}

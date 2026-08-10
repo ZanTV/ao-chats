@@ -22,7 +22,7 @@ export class NotificationService {
       data: { userId, type, title, body, actorId, data: (data || {}) as object },
       include: {
         actor: {
-          select: { id: true, firstName: true, lastName: true, avatarId: true },
+          select: { id: true, firstName: true, lastName: true, avatarId: true, avatarUrl: true, avatarVersion: true },
         },
       },
     });
@@ -53,7 +53,7 @@ export class NotificationService {
       where: { userId },
       include: {
         actor: {
-          select: { id: true, firstName: true, lastName: true, avatarId: true },
+          select: { id: true, firstName: true, lastName: true, avatarId: true, avatarUrl: true, avatarVersion: true },
         },
       },
       orderBy: { createdAt: 'desc' },
