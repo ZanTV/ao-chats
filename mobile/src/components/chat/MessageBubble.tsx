@@ -274,7 +274,12 @@ export function MessageBubble({
           />
         ) : message.type === 'IMAGE' || message.type === 'FILE' ? (
           <Text style={[styles.messageText, { color: textColor + 'AA', fontSize: fonts.sm }]}>
-            {message.type === 'IMAGE' ? '📷 Photo' : '📄 Document'}
+            {message.type === 'IMAGE'
+              ? '📷 Photo'
+              : message.attachment?.kind === 'video' ||
+                  String(message.attachment?.mimeType || '').startsWith('video/')
+                ? '🎥 Video'
+                : '📄 Document'}
             {displayContent?.trim() ? `\n${displayContent}` : ''}
           </Text>
         ) : onEntityPress ? (

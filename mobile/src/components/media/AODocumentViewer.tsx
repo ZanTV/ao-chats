@@ -58,6 +58,36 @@ export function AODocumentViewer({
     [attachment]
   );
 
+  const docIcon = useMemo((): keyof typeof Ionicons.glyphMap => {
+    const m = attachment.mimeType.toLowerCase();
+    const n = attachment.fileName.toLowerCase();
+    if (isPdf) return 'document-text-outline';
+    if (m.includes('word') || n.endsWith('.doc') || n.endsWith('.docx')) return 'document-outline';
+    if (m.includes('sheet') || m.includes('excel') || n.endsWith('.xls') || n.endsWith('.xlsx')) {
+      return 'grid-outline';
+    }
+    if (m.includes('presentation') || n.endsWith('.ppt') || n.endsWith('.pptx')) {
+      return 'easel-outline';
+    }
+    if (m.startsWith('text/') || n.endsWith('.txt') || n.endsWith('.csv')) return 'reader-outline';
+    if (m.includes('zip')) return 'archive-outline';
+    return 'document-attach-outline';
+  }, [attachment, isPdf]);
+
+  const typeLabel = useMemo(() => {
+    const n = attachment.fileName.toLowerCase();
+    if (isPdf) return 'PDF';
+    if (n.endsWith('.docx')) return 'DOCX';
+    if (n.endsWith('.doc')) return 'DOC';
+    if (n.endsWith('.xlsx')) return 'XLSX';
+    if (n.endsWith('.xls')) return 'XLS';
+    if (n.endsWith('.pptx')) return 'PPTX';
+    if (n.endsWith('.ppt')) return 'PPT';
+    if (n.endsWith('.csv')) return 'CSV';
+    if (n.endsWith('.txt')) return 'TXT';
+    return attachment.mimeType.split('/').pop()?.toUpperCase() || 'FILE';
+  }, [attachment, isPdf]);
+
   const openExternal = async () => {
     if (onOpenExternal) {
       onOpenExternal();
@@ -75,13 +105,13 @@ export function AODocumentViewer({
     <ScrollView contentContainerStyle={styles.wrap}>
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={[styles.icon, { backgroundColor: colors.primary + '18' }]}>
-          <Ionicons name="document-text-outline" size={36} color={colors.primary} />
+          <Ionicons name={docIcon} size={36} color={colors.primary} />
         </View>
         <Text style={{ color: colors.text, fontSize: fonts.md, fontWeight: '700', textAlign: 'center' }}>
           {attachment.fileName}
         </Text>
         <Text style={{ color: colors.textSecondary, fontSize: fonts.sm, marginTop: 6 }}>
-          {attachment.mimeType.split('/').pop()?.toUpperCase()} · {formatFileSize(attachment.fileSize)}
+          {typeLabel} · {formatFileSize(attachment.fileSize)}
         </Text>
         {!!senderName && (
           <Text style={{ color: colors.textSecondary, fontSize: fonts.xs, marginTop: 10 }}>

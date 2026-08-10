@@ -34,6 +34,7 @@ const replyToSelect = {
   type: true,
   deletedForAll: true,
   isDeleted: true,
+  attachment: true,
   sender: { select: { firstName: true } },
 } as const;
 

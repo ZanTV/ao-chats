@@ -542,8 +542,14 @@ export default function ChatScreen() {
 
         await Promise.all([loadMessages(), loadConversationMeta()]);
 
+        // Always open at latest messages unless jumping to a specific message.
+        // Never restore a previous free-scroll offset.
         if (!highlightParam) {
-          scrollToLatest(false);
+          stickToBottomRef.current = true;
+          requestAnimationFrame(() => {
+            scrollToLatest(false);
+            setTimeout(() => scrollToLatest(false), 80);
+          });
         }
         socketService.joinConversation(conversationId);
         // Optimistic local badge clear + socket + HTTP (works even if socket is down)
@@ -767,17 +773,21 @@ export default function ChatScreen() {
           (p) => setUploadPercent(p.percent),
           controller.signal
         );
+        const uploadedWithMeta: typeof uploaded = {
+          ...uploaded,
+          duration: uploaded.duration ?? pending.duration,
+        };
         await seedLocalAttachment({
-          attachmentId: uploaded.id,
-          storageKey: uploaded.storageKey,
+          attachmentId: uploadedWithMeta.id,
+          storageKey: uploadedWithMeta.storageKey,
           localUri: pending.localUri,
-          fileSize: uploaded.fileSize,
+          fileSize: uploadedWithMeta.fileSize,
           downloadedAt: new Date().toISOString(),
-          mimeType: uploaded.mimeType,
-          fileName: uploaded.fileName,
+          mimeType: uploadedWithMeta.mimeType,
+          fileName: uploadedWithMeta.fileName,
         });
 
-        const msgType = messageTypeFromKindClient(uploaded.kind);
+        const msgType = messageTypeFromKindClient(uploadedWithMeta.kind);
         const optimistic: Message = {
           id: tempId,
           content,
@@ -798,6 +808,7 @@ export default function ChatScreen() {
                       ? t.chat.you
                       : otherUser?.firstName || 'User',
                 },
+                attachment: replyTo.attachment || undefined,
               }
             : undefined,
           reactions: [],
@@ -805,7 +816,7 @@ export default function ChatScreen() {
           pending: true,
           status: recipientOnline ? 'SENT' : 'WAITING',
           waitingAt: recipientOnline ? undefined : new Date().toISOString(),
-          attachment: uploaded,
+          attachment: uploadedWithMeta,
         };
 
         stickToBottomRef.current = true;
@@ -825,7 +836,7 @@ export default function ChatScreen() {
         const saved = normalizeMessage(
           (await api.sendMessage(conversationId, content, replyToId, tempId, {
             type: msgType,
-            attachment: uploaded,
+            attachment: uploadedWithMeta,
           })) as Record<string, unknown>
         );
         updateMessages((prev) => upsertMessage(prev, saved, tempId));

@@ -11,6 +11,7 @@ export type PendingAttachment = {
   height?: number;
   /** Local preview for images/videos */
   previewUri?: string;
+  duration?: number;
 };
 
 export function kindFromMimeClient(mime: string): MessageAttachment['kind'] {

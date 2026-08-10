@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ScrollView,
   Platform,
   ActivityIndicator,
+  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -31,6 +32,7 @@ type RecentItem = {
   width?: number;
   height?: number;
   mediaType?: 'photo' | 'video';
+  duration?: number;
 };
 
 interface Props {
@@ -70,18 +72,23 @@ export function AttachmentSheet({
 }: Props) {
   const [recent, setRecent] = useState<RecentItem[]>([]);
   const [loadingRecent, setLoadingRecent] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  const openingGallery = useRef(false);
 
   const loadRecent = useCallback(async () => {
     if (Platform.OS === 'web') {
       setRecent([]);
+      setPermissionDenied(false);
       return;
     }
     setLoadingRecent(true);
+    setPermissionDenied(false);
     try {
       const MediaLibrary = await import('expo-media-library/legacy');
       const perm = await MediaLibrary.requestPermissionsAsync();
       if (!perm.granted) {
         setRecent([]);
+        setPermissionDenied(true);
         return;
       }
       const page = await MediaLibrary.getAssetsAsync({
@@ -89,16 +96,28 @@ export function AttachmentSheet({
         mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
         sortBy: [[MediaLibrary.SortBy.creationTime, false]],
       });
-      const items: RecentItem[] = page.assets.map((a) => ({
-        id: a.id,
-        uri: a.uri,
-        mimeType: a.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
-        fileName: a.filename || (a.mediaType === 'video' ? 'video.mp4' : 'photo.jpg'),
-        fileSize: 0,
-        width: a.width,
-        height: a.height,
-        mediaType: a.mediaType === 'video' ? 'video' : 'photo',
-      }));
+      const items: RecentItem[] = [];
+      for (const a of page.assets) {
+        let uri = a.uri;
+        // Prefer local URI for reliable thumbnails on some Android devices
+        try {
+          const info = await MediaLibrary.getAssetInfoAsync(a.id);
+          if (info.localUri) uri = info.localUri;
+        } catch {
+          /* keep asset.uri */
+        }
+        items.push({
+          id: a.id,
+          uri,
+          mimeType: a.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
+          fileName: a.filename || (a.mediaType === 'video' ? 'video.mp4' : 'photo.jpg'),
+          fileSize: 1,
+          width: a.width,
+          height: a.height,
+          mediaType: a.mediaType === 'video' ? 'video' : 'photo',
+          duration: typeof a.duration === 'number' ? a.duration : undefined,
+        });
+      }
       setRecent(items);
     } catch {
       setRecent([]);
@@ -108,7 +127,10 @@ export function AttachmentSheet({
   }, []);
 
   useEffect(() => {
-    if (visible) loadRecent();
+    if (visible) {
+      openingGallery.current = false;
+      loadRecent();
+    }
   }, [visible, loadRecent]);
 
   const emitFile = (file: PendingAttachment) => {
@@ -122,30 +144,36 @@ export function AttachmentSheet({
   };
 
   const pickGallery = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      onError("You don't have permission to upload this file.");
-      return;
+    if (openingGallery.current) return;
+    openingGallery.current = true;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        onError("You don't have permission to upload this file.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        quality: 0.85,
+        allowsMultipleSelection: false,
+        videoMaxDuration: 120,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      const mime = asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg');
+      emitFile({
+        localUri: asset.uri,
+        mimeType: mime,
+        fileName: asset.fileName || (mime.startsWith('video/') ? 'video.mp4' : 'photo.jpg'),
+        fileSize: asset.fileSize || 0,
+        kind: kindFromMimeClient(mime),
+        width: asset.width,
+        height: asset.height,
+        previewUri: asset.uri,
+      });
+    } finally {
+      openingGallery.current = false;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
-      quality: 0.85,
-      allowsMultipleSelection: false,
-      videoMaxDuration: 120,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
-    const mime = asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg');
-    emitFile({
-      localUri: asset.uri,
-      mimeType: mime,
-      fileName: asset.fileName || (mime.startsWith('video/') ? 'video.mp4' : 'photo.jpg'),
-      fileSize: asset.fileSize || 0,
-      kind: kindFromMimeClient(mime),
-      width: asset.width,
-      height: asset.height,
-      previewUri: asset.uri,
-    });
   };
 
   const pickDocument = async () => {
@@ -155,6 +183,7 @@ export function AttachmentSheet({
       type: [
         'application/pdf',
         'text/plain',
+        'text/csv',
         'application/msword',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'application/vnd.ms-excel',
@@ -188,8 +217,20 @@ export function AttachmentSheet({
       width: item.width,
       height: item.height,
       previewUri: item.uri,
+      duration: item.duration,
     });
   };
+
+  const swipeUpToGallery = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => g.dy < -18 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderRelease: (_e, g) => {
+        if (g.dy < -48 || g.vy < -0.6) {
+          void pickGallery();
+        }
+      },
+    })
+  ).current;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -230,30 +271,60 @@ export function AttachmentSheet({
             />
           </View>
 
-          <Text style={[styles.recentLabel, { color: colors.textSecondary, fontSize: fonts.sm }]}>
-            {labels.recent}
-          </Text>
-          {loadingRecent ? (
-            <ActivityIndicator color={colors.primary} style={{ marginVertical: Spacing.md }} />
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recentRow}>
-              {recent.map((item) => (
-                <TouchableOpacity key={item.id} onPress={() => pickRecent(item)} activeOpacity={0.85}>
-                  <Image source={{ uri: item.uri }} style={styles.thumb} />
-                  {item.mediaType === 'video' && (
-                    <View style={styles.videoBadge}>
-                      <Ionicons name="play" size={12} color="#fff" />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-              {!recent.length && (
-                <Text style={{ color: colors.textTertiary, fontSize: fonts.xs, paddingVertical: Spacing.sm }}>
-                  —
+          <View {...swipeUpToGallery.panHandlers}>
+            <View style={styles.recentHeader}>
+              <Text style={[styles.recentLabel, { color: colors.textSecondary, fontSize: fonts.sm }]}>
+                {labels.recent}
+              </Text>
+              <Text style={{ color: colors.textTertiary, fontSize: fonts.xs }}>↑ Gallery</Text>
+            </View>
+
+            {loadingRecent ? (
+              <ActivityIndicator color={colors.primary} style={{ marginVertical: Spacing.md }} />
+            ) : permissionDenied ? (
+              <TouchableOpacity
+                style={[styles.permissionBox, { borderColor: colors.border }]}
+                onPress={loadRecent}
+              >
+                <Ionicons name="lock-closed-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.textSecondary, fontSize: fonts.xs, flex: 1 }}>
+                  Allow photo access to see recent media
                 </Text>
-              )}
-            </ScrollView>
-          )}
+              </TouchableOpacity>
+            ) : Platform.OS === 'web' ? (
+              <TouchableOpacity
+                style={[styles.permissionBox, { borderColor: colors.border }]}
+                onPress={pickGallery}
+              >
+                <Ionicons name="images-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.textSecondary, fontSize: fonts.xs, flex: 1 }}>
+                  Open gallery to choose photos or videos
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.recentRow}
+              >
+                {recent.map((item) => (
+                  <TouchableOpacity key={item.id} onPress={() => pickRecent(item)} activeOpacity={0.85}>
+                    <Image source={{ uri: item.uri }} style={styles.thumb} />
+                    {item.mediaType === 'video' && (
+                      <View style={styles.videoBadge}>
+                        <Ionicons name="play" size={12} color="#fff" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+                {!recent.length && (
+                  <Text style={{ color: colors.textTertiary, fontSize: fonts.xs, paddingVertical: Spacing.sm }}>
+                    No recent media
+                  </Text>
+                )}
+              </ScrollView>
+            )}
+          </View>
 
           <TouchableOpacity
             style={[styles.cancelBtn, { backgroundColor: colors.pressHighlight || colors.border }]}
@@ -338,13 +409,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  recentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.sm,
+  },
   recentLabel: {
     fontWeight: '600',
-    marginBottom: Spacing.sm,
   },
   recentRow: {
     gap: Spacing.sm,
     paddingBottom: Spacing.md,
+    minHeight: 80,
   },
   thumb: {
     width: 72,
@@ -359,6 +436,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
     borderRadius: 10,
     padding: 3,
+  },
+  permissionBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
   },
   cancelBtn: {
     marginTop: Spacing.sm,

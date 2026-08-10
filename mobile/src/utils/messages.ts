@@ -14,6 +14,7 @@ export interface ChatMessage {
     isDeleted?: boolean;
     senderId?: string;
     sender: { firstName: string };
+    attachment?: import('../attachments/types').MessageAttachment | null;
   };
   reactions: Array<{ emoji: string; userId: string; user: { firstName: string } }>;
   readAt?: string;
@@ -168,13 +169,28 @@ export function upsertMessage(
 export function normalizeMessage(raw: Record<string, unknown>): ChatMessage {
   const stars = raw.stars as Array<{ id: string }> | undefined;
   const attachment = coerceAttachment(raw.attachment);
+  const rawReply = raw.replyTo as Record<string, unknown> | null | undefined;
+  let replyTo: ChatMessage['replyTo'];
+  if (rawReply && typeof rawReply === 'object') {
+    const replyAttachment = coerceAttachment(rawReply.attachment);
+    replyTo = {
+      id: String(rawReply.id),
+      content: String(rawReply.content ?? ''),
+      type: rawReply.type ? String(rawReply.type) : undefined,
+      deletedForAll: Boolean(rawReply.deletedForAll),
+      isDeleted: Boolean(rawReply.isDeleted),
+      senderId: rawReply.senderId ? String(rawReply.senderId) : undefined,
+      sender: (rawReply.sender as { firstName: string }) || { firstName: 'Reply' },
+      ...(replyAttachment ? { attachment: replyAttachment } : {}),
+    };
+  }
   return {
     id: String(raw.id),
     content: String(raw.content ?? ''),
     senderId: String(raw.senderId),
     type: String(raw.type ?? 'TEXT'),
     replyToId: raw.replyToId as string | undefined,
-    replyTo: raw.replyTo as ChatMessage['replyTo'],
+    replyTo,
     reactions: (raw.reactions as ChatMessage['reactions']) || [],
     readAt: raw.readAt ? String(raw.readAt) : undefined,
     deliveredAt: raw.deliveredAt ? String(raw.deliveredAt) : undefined,

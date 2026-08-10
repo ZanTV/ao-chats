@@ -12,6 +12,7 @@ export function formatMessagePreview(
     senderId: string;
     isDeleted?: boolean;
     deletedForAll?: boolean;
+    attachment?: unknown;
   },
   currentUserId: string,
   senderName?: string
@@ -22,16 +23,31 @@ export function formatMessagePreview(
     return '';
   }
 
-  switch (message.type) {
-    case 'IMAGE':
-      return `${prefix}: 📷 Photo`;
-    case 'FILE':
-      return `${prefix}: 📄 Document`;
-    case 'SYSTEM':
-      return message.content;
-    default:
-      return `${prefix}: ${message.content}`;
+  if (message.type === 'IMAGE') {
+    return `${prefix}: 📷 Photo`;
   }
+
+  if (message.type === 'FILE') {
+    const att =
+      message.attachment && typeof message.attachment === 'object'
+        ? (message.attachment as { kind?: string; mimeType?: string })
+        : null;
+    const kind = String(att?.kind || '').toLowerCase();
+    const mime = String(att?.mimeType || '').toLowerCase();
+    if (kind === 'video' || mime.startsWith('video/')) {
+      return `${prefix}: 🎥 Video`;
+    }
+    if (kind === 'image' || mime.startsWith('image/')) {
+      return `${prefix}: 📷 Photo`;
+    }
+    return `${prefix}: 📄 Document`;
+  }
+
+  if (message.type === 'SYSTEM') {
+    return message.content;
+  }
+
+  return `${prefix}: ${message.content}`;
 }
 
 export function sortConversations<T extends { isPinned?: boolean; updatedAt: string }>(

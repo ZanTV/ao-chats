@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -44,30 +44,142 @@ interface Props {
   renderCaption?: (caption: string) => React.ReactNode;
 }
 
+function formatDuration(seconds?: number): string {
+  if (!Number.isFinite(seconds) || !seconds || seconds <= 0) return '';
+  const s = Math.round(seconds);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, '0')}`;
+}
+
+function documentIcon(mime: string, fileName: string): keyof typeof Ionicons.glyphMap {
+  const m = mime.toLowerCase();
+  const n = fileName.toLowerCase();
+  if (m === 'application/pdf' || n.endsWith('.pdf')) return 'document-text-outline';
+  if (
+    m.includes('word') ||
+    m.includes('msword') ||
+    n.endsWith('.doc') ||
+    n.endsWith('.docx')
+  ) {
+    return 'document-outline';
+  }
+  if (m.includes('sheet') || m.includes('excel') || n.endsWith('.xls') || n.endsWith('.xlsx')) {
+    return 'grid-outline';
+  }
+  if (
+    m.includes('presentation') ||
+    m.includes('powerpoint') ||
+    n.endsWith('.ppt') ||
+    n.endsWith('.pptx')
+  ) {
+    return 'easel-outline';
+  }
+  if (m.startsWith('text/') || n.endsWith('.txt') || n.endsWith('.csv')) return 'reader-outline';
+  if (m.includes('zip') || n.endsWith('.zip')) return 'archive-outline';
+  return 'document-attach-outline';
+}
+
+function documentTypeLabel(mime: string, fileName: string): string {
+  const m = mime.toLowerCase();
+  const n = fileName.toLowerCase();
+  if (m === 'application/pdf' || n.endsWith('.pdf')) return 'PDF';
+  if (n.endsWith('.docx') || m.includes('wordprocessingml')) return 'DOCX';
+  if (n.endsWith('.doc') || m === 'application/msword') return 'DOC';
+  if (n.endsWith('.xlsx') || m.includes('spreadsheetml')) return 'XLSX';
+  if (n.endsWith('.xls')) return 'XLS';
+  if (n.endsWith('.pptx') || m.includes('presentationml')) return 'PPTX';
+  if (n.endsWith('.ppt')) return 'PPT';
+  if (n.endsWith('.csv')) return 'CSV';
+  if (n.endsWith('.txt') || m === 'text/plain') return 'TXT';
+  if (n.endsWith('.zip') || m.includes('zip')) return 'ZIP';
+  return mime.split('/').pop()?.toUpperCase() || 'FILE';
+}
+
+function WebVideoPreview({
+  uri,
+  width,
+  height,
+  onPress,
+  durationLabel,
+}: {
+  uri: string;
+  width: number;
+  height: number;
+  onPress: () => void;
+  durationLabel: string;
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={onPress}
+      style={{ width, height, borderRadius: BorderRadius.md, overflow: 'hidden', backgroundColor: '#111' }}
+    >
+      {/* RN Web: native video element shows a real frame without inventing thumbnails */}
+      {React.createElement('video', {
+        src: uri,
+        muted: true,
+        playsInline: true,
+        preload: 'metadata',
+        style: {
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          display: 'block',
+        },
+      })}
+      <View style={styles.videoPlayOverlay} pointerEvents="none">
+        <Ionicons name="play-circle" size={48} color="#fff" />
+      </View>
+      {!!durationLabel && (
+        <View style={styles.durationBadge}>
+          <Text style={styles.durationText}>{durationLabel}</Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
 function NativeVideoPreview({
   attachment,
   width,
   height,
   onPress,
+  durationLabel,
 }: {
   attachment: MessageAttachment;
   width: number;
   height: number;
   onPress: () => void;
+  durationLabel: string;
 }) {
   const [token, setToken] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    getAccessToken().then(setToken).catch(() => setFailed(true));
-  }, []);
+    let cancelled = false;
+    getAccessToken()
+      .then((t) => {
+        if (!cancelled) setToken(t);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment.id]);
 
-  const source = token && !failed
-    ? {
-        uri: resolveAttachmentUrl(attachment),
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    : '';
+  const source = useMemo(
+    () =>
+      token && !failed
+        ? {
+            uri: resolveAttachmentUrl(attachment),
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        : '',
+    [token, failed, attachment]
+  );
 
   const player = useVideoPlayer(source, (p) => {
     p.muted = true;
@@ -76,8 +188,7 @@ function NativeVideoPreview({
 
   useEffect(() => {
     const sub = player.addListener('statusChange', ({ status, error }) => {
-      if (status === 'error') setFailed(true);
-      if (error) setFailed(true);
+      if (status === 'error' || error) setFailed(true);
     });
     return () => sub.remove();
   }, [player]);
@@ -86,7 +197,7 @@ function NativeVideoPreview({
     <TouchableOpacity
       activeOpacity={0.9}
       onPress={onPress}
-      style={{ width, height, borderRadius: BorderRadius.md, overflow: 'hidden' }}
+      style={{ width, height, borderRadius: BorderRadius.md, overflow: 'hidden', backgroundColor: '#111' }}
     >
       {token && !failed ? (
         <VideoView
@@ -97,12 +208,21 @@ function NativeVideoPreview({
         />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.center]}>
-          <ActivityIndicator color="#fff" />
+          {failed ? (
+            <Ionicons name="videocam-outline" size={36} color="#fff" />
+          ) : (
+            <ActivityIndicator color="#fff" />
+          )}
         </View>
       )}
       <View style={styles.videoPlayOverlay} pointerEvents="none">
         <Ionicons name="play-circle" size={48} color="#fff" />
       </View>
+      {!!durationLabel && (
+        <View style={styles.durationBadge}>
+          <Text style={styles.durationText}>{durationLabel}</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -125,15 +245,21 @@ export function MediaMessageBody({
   const [localUri, setLocalUri] = useState<string | null>(null);
   const [imageBroken, setImageBroken] = useState(false);
 
+  const attachmentId = attachment.id;
+  const storageKey = attachment.storageKey;
+  const kind = attachment.kind;
+  const durationLabel = formatDuration(attachment.duration);
+
   const loadMedia = useCallback(
     async (signal?: AbortSignal, force = false) => {
       if (force) {
-        await invalidateLocalAttachment(attachment.id);
+        await invalidateLocalAttachment(attachmentId);
         setLocalUri(null);
         setImageBroken(false);
       }
 
-      const local = await getLocalAttachment(attachment.id, attachment.storageKey);
+      const local = await getLocalAttachment(attachmentId, storageKey);
+      if (signal?.aborted) return;
       if (local?.localUri) {
         setLocalUri(local.localUri);
         setState('DOWNLOADED');
@@ -141,7 +267,8 @@ export function MediaMessageBody({
         return;
       }
 
-      if (attachment.kind === 'video' && Platform.OS !== 'web') {
+      // Native video: stream preview without full download.
+      if (kind === 'video' && Platform.OS !== 'web') {
         setState('DOWNLOADED');
         return;
       }
@@ -150,18 +277,23 @@ export function MediaMessageBody({
       try {
         const record = await ensureLocalAttachment(
           attachment,
-          (p) => setProgress(p),
+          (p) => {
+            if (!signal?.aborted) setProgress(p);
+          },
           signal
         );
+        if (signal?.aborted) return;
         setLocalUri(record.localUri);
         setState('DOWNLOADED');
         setProgress(1);
         setImageBroken(false);
       } catch {
-        setState('DOWNLOAD_FAILED');
+        if (!signal?.aborted) setState('DOWNLOAD_FAILED');
       }
     },
-    [attachment]
+    // Intentionally stable keys — avoid abort loops from new attachment object refs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [attachmentId, storageKey, kind]
   );
 
   useEffect(() => {
@@ -196,7 +328,17 @@ export function MediaMessageBody({
     void startDownload();
   }, [startDownload]);
 
-  if (attachment.kind === 'image') {
+  const captionNode = !!caption?.trim() && (
+    <View style={styles.captionWrap}>
+      {renderCaption ? (
+        renderCaption(caption)
+      ) : (
+        <Text style={{ color: textColor, fontSize: fonts.md }}>{caption}</Text>
+      )}
+    </View>
+  );
+
+  if (kind === 'image') {
     const canShow = Boolean(localUri) && !imageBroken && state === 'DOWNLOADED';
     return (
       <View style={styles.mediaWrap}>
@@ -230,39 +372,25 @@ export function MediaMessageBody({
                     {Math.round(progress * 100)}%
                   </Text>
                 </>
-              ) : state === 'DOWNLOAD_FAILED' ? (
-                <>
-                  <Ionicons name="image-outline" size={28} color={mutedColor} />
-                  <Text style={{ color: primaryColor, fontSize: fonts.xs, marginTop: 6 }}>
-                    {labels.retry}
-                  </Text>
-                </>
               ) : (
                 <>
                   <Ionicons name="image-outline" size={28} color={mutedColor} />
                   <Text style={{ color: primaryColor, fontSize: fonts.xs, marginTop: 6 }}>
-                    {labels.download}
+                    {state === 'DOWNLOAD_FAILED' ? labels.retry : labels.download}
                   </Text>
                 </>
               )}
             </View>
           )}
         </TouchableOpacity>
-        {!!caption?.trim() && (
-          <View style={styles.captionWrap}>
-            {renderCaption ? (
-              renderCaption(caption)
-            ) : (
-              <Text style={{ color: textColor, fontSize: fonts.md }}>{caption}</Text>
-            )}
-          </View>
-        )}
+        {captionNode}
       </View>
     );
   }
 
-  if (attachment.kind === 'video') {
-    const useStreamingPreview = Platform.OS !== 'web' && state !== 'DOWNLOAD_FAILED';
+  if (kind === 'video') {
+    const useStreamingPreview = Platform.OS !== 'web';
+    const webReady = Platform.OS === 'web' && localUri && state === 'DOWNLOADED';
 
     return (
       <View style={styles.mediaWrap}>
@@ -271,11 +399,16 @@ export function MediaMessageBody({
             attachment={attachment}
             width={240}
             height={160}
-            onPress={() => {
-              if (onOpenViewer) openLocal();
-              else if (localUri) openLocal();
-              else startDownload();
-            }}
+            durationLabel={durationLabel}
+            onPress={() => openLocal()}
+          />
+        ) : webReady ? (
+          <WebVideoPreview
+            uri={localUri!}
+            width={240}
+            height={160}
+            durationLabel={durationLabel}
+            onPress={() => openLocal()}
           />
         ) : (
           <TouchableOpacity
@@ -285,32 +418,23 @@ export function MediaMessageBody({
             ]}
             activeOpacity={0.85}
             onPress={() => {
-              if (onOpenViewer) openLocal();
-              else if (state === 'DOWNLOADED' && localUri) openLocal();
-              else startDownload();
+              if (state !== 'DOWNLOADING') startDownload();
             }}
           >
-            {localUri && state === 'DOWNLOADED' && Platform.OS === 'web' ? (
-              <View style={{ width: '100%', height: '100%' }}>
-                <Ionicons name="play-circle" size={48} color={textColor} />
-              </View>
+            {state === 'DOWNLOADING' ? (
+              <>
+                <ActivityIndicator color={primaryColor} />
+                <Text style={{ color: textColor, fontSize: fonts.sm, marginTop: 8 }}>
+                  {labels.downloading} {Math.round(progress * 100)}%
+                </Text>
+              </>
             ) : (
-              <Ionicons name="play-circle" size={48} color={textColor} />
-            )}
-            {state === 'DOWNLOADING' && (
-              <Text style={{ color: textColor, fontSize: fonts.sm, marginTop: 8 }}>
-                {labels.downloading} {Math.round(progress * 100)}%
-              </Text>
-            )}
-            {state === 'NOT_DOWNLOADED' && (
-              <Text style={{ color: primaryColor, fontSize: fonts.sm, marginTop: 8 }}>
-                {labels.download}
-              </Text>
-            )}
-            {state === 'DOWNLOAD_FAILED' && (
-              <Text style={{ color: primaryColor, fontSize: fonts.sm, marginTop: 8 }}>
-                {labels.retry}
-              </Text>
+              <>
+                <Ionicons name="play-circle" size={48} color={textColor} />
+                <Text style={{ color: primaryColor, fontSize: fonts.sm, marginTop: 8 }}>
+                  {state === 'DOWNLOAD_FAILED' ? labels.retry : labels.download}
+                </Text>
+              </>
             )}
           </TouchableOpacity>
         )}
@@ -319,20 +443,14 @@ export function MediaMessageBody({
           numberOfLines={1}
         >
           {attachment.fileName}
-          {attachment.duration ? ` · ${Math.round(attachment.duration)}s` : ''}
         </Text>
-        {!!caption?.trim() && (
-          <View style={styles.captionWrap}>
-            {renderCaption ? (
-              renderCaption(caption)
-            ) : (
-              <Text style={{ color: textColor, fontSize: fonts.md }}>{caption}</Text>
-            )}
-          </View>
-        )}
+        {captionNode}
       </View>
     );
   }
+
+  const docIcon = documentIcon(attachment.mimeType, attachment.fileName);
+  const typeLabel = documentTypeLabel(attachment.mimeType, attachment.fileName);
 
   return (
     <View style={styles.docWrap}>
@@ -351,7 +469,7 @@ export function MediaMessageBody({
           {state === 'DOWNLOADING' ? (
             <ActivityIndicator color={primaryColor} />
           ) : (
-            <Ionicons name="document-text-outline" size={22} color={textColor} />
+            <Ionicons name={docIcon} size={22} color={textColor} />
           )}
         </View>
         <View style={styles.docMeta}>
@@ -359,8 +477,7 @@ export function MediaMessageBody({
             {attachment.fileName}
           </Text>
           <Text style={{ color: mutedColor, fontSize: fonts.xs, marginTop: 2 }}>
-            {attachment.mimeType.split('/').pop()?.toUpperCase() || 'FILE'} ·{' '}
-            {formatFileSize(attachment.fileSize)}
+            {typeLabel} · {formatFileSize(attachment.fileSize)}
           </Text>
           {state === 'DOWNLOADING' && (
             <View style={styles.barTrack}>
@@ -385,15 +502,7 @@ export function MediaMessageBody({
           )}
         </View>
       </TouchableOpacity>
-      {!!caption?.trim() && (
-        <View style={styles.captionWrap}>
-          {renderCaption ? (
-            renderCaption(caption)
-          ) : (
-            <Text style={{ color: textColor, fontSize: fonts.md }}>{caption}</Text>
-          )}
-        </View>
-      )}
+      {captionNode}
     </View>
   );
 }
@@ -428,6 +537,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.15)',
+  },
+  durationBadge: {
+    position: 'absolute',
+    left: 8,
+    bottom: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  durationText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   center: {
     alignItems: 'center',

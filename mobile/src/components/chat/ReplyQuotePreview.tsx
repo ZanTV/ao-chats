@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ChatMessage } from '../../utils/messages';
-import { getReplyPreviewText } from '../../utils/replyPreview';
+import { getReplyPreviewText, getReplyMediaIcon } from '../../utils/replyPreview';
 import { BorderRadius, Spacing } from '../../theme';
 
 interface ThemeColors {
@@ -29,14 +29,6 @@ interface Props {
   onPress?: () => void;
 }
 
-function getMediaIcon(type: string): keyof typeof Ionicons.glyphMap {
-  const upper = type.toUpperCase();
-  if (upper === 'IMAGE') return 'image-outline';
-  if (upper === 'VIDEO') return 'videocam-outline';
-  if (upper === 'FILE') return 'document-outline';
-  return 'chatbubble-outline';
-}
-
 export function ReplyQuotePreview({
   replyTo,
   variant,
@@ -48,8 +40,8 @@ export function ReplyQuotePreview({
   onPress,
 }: Props) {
   const preview = getReplyPreviewText(replyTo, deletedLabel);
-  const type = String(replyTo.type || 'TEXT').toUpperCase();
-  const isMedia = ['IMAGE', 'VIDEO', 'FILE'].includes(type);
+  const icon = getReplyMediaIcon(replyTo);
+  const isMedia = icon !== 'chatbubble-outline';
   const isComposer = variant === 'composer';
 
   const accent = isComposer ? colors.primary : isOwn ? 'rgba(255,255,255,0.95)' : colors.primary;
@@ -94,12 +86,7 @@ export function ReplyQuotePreview({
       </View>
       <View style={styles.body}>
         {isMedia && (
-          <Ionicons
-            name={getMediaIcon(type)}
-            size={13}
-            color={textColor}
-            style={styles.mediaIcon}
-          />
+          <Ionicons name={icon} size={13} color={textColor} style={styles.mediaIcon} />
         )}
         <Text
           style={[styles.preview, { color: textColor, fontSize: fonts.xs }]}
