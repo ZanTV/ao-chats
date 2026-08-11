@@ -192,7 +192,7 @@ export class UserService {
     const photos = await prisma.profileGalleryPhoto.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
-      take: 24,
+      take: 4,
     });
     return photos.map((p) => ({
       id: p.id,
@@ -217,8 +217,8 @@ export class UserService {
     if (current.isSystemAccount) throw new AppError(403, 'System accounts cannot be modified');
 
     const count = await prisma.profileGalleryPhoto.count({ where: { userId } });
-    if (count >= 24) {
-      throw new AppError(400, 'My Own DP library is full (max 24 photos).');
+    if (count >= 4) {
+      throw new AppError(400, 'My Own DP library is full (max 4 photos).');
     }
 
     const saved = await uploadService.saveProfileAvatar({

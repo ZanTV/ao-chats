@@ -274,7 +274,8 @@ export const en = {
     useAoAvatar: 'AO Avatars',
     chooseAvatar: 'Choose your profile avatar',
     browseOwnDp: 'Browse',
-    ownDpHint: 'Browse uploads to Agrohub. Select one, then Save. Tap ✕ to remove from My Own DP.',
+    ownDpHint: 'Up to 4 photos. Select one, then Save. Tap ✕ to remove. Browse hides when full.',
+    ownDpFull: 'My Own DP is full (max 4). Remove a photo to browse again.',
     removeOwnDp: 'Remove photo',
     removeOwnDpConfirm: 'Remove this photo from My Own DP?',
     avatarNav: {
@@ -636,7 +637,8 @@ export const sw: typeof en = {
     useAoAvatar: 'Avatari za AO',
     chooseAvatar: 'Chagua avatar yako ya wasifu',
     browseOwnDp: 'Browse',
-    ownDpHint: 'Browse inahifadhi Agrohub. Chagua moja, kisha Save. Bonyeza ✕ kuondoa kwenye My Own DP.',
+    ownDpHint: 'Picha hadi 4. Chagua moja, kisha Save. Bonyeza ✕ kuondoa. Browse inaondoka ukijaa.',
+    ownDpFull: 'My Own DP imejaa (max 4). Ondoa picha ili Browse irudi.',
     removeOwnDp: 'Ondoa picha',
     removeOwnDpConfirm: 'Ondoa picha hii kwenye My Own DP?',
     avatarNav: {

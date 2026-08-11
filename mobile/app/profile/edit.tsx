@@ -52,6 +52,9 @@ const AVATAR_CATEGORIES = [
   { key: 'own', labelKey: 'myOwnDp' as const },
 ];
 
+/** My Own DP library hard cap — Browse hides at this count. */
+const MAX_OWN_DPS = 4;
+
 export default function EditProfileScreen() {
   const { user, updateUser, loadUser } = useAuthStore();
   const { colors, fonts, t } = useSettingsStore();
@@ -171,6 +174,11 @@ export default function EditProfileScreen() {
   }, [ownDps, user?.avatarUrl, user?.avatarVersion, previewAoAvatar, selectedOwnDpId]);
 
   const browseOwnDps = async () => {
+    const remaining = MAX_OWN_DPS - ownDps.length;
+    if (remaining <= 0) {
+      Alert.alert('', t.profile.ownDpFull);
+      return;
+    }
     setBrowsing(true);
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -182,12 +190,13 @@ export default function EditProfileScreen() {
         mediaTypes: ['images'],
         quality: 0.9,
         allowsMultipleSelection: true,
-        selectionLimit: 12,
+        selectionLimit: remaining,
       });
       if (result.canceled || !result.assets?.length) return;
 
+      const assets = result.assets.slice(0, remaining);
       const uploaded = await api.uploadAvatarGallery(
-        result.assets.map((asset) => ({
+        assets.map((asset) => ({
           localUri: asset.uri,
           mimeType: asset.mimeType || 'image/jpeg',
           fileName: asset.fileName || 'avatar.jpg',
@@ -223,6 +232,7 @@ export default function EditProfileScreen() {
             await api.deleteAvatarGalleryPhoto(id);
             setOwnDps((prev) => prev.filter((p) => p.id !== id));
             if (selectedOwnDpId === id) setSelectedOwnDpId(null);
+            await refreshGallery();
           } catch (err) {
             Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
           }
@@ -467,6 +477,7 @@ export default function EditProfileScreen() {
                     headers: authHeaders,
                   }}
                   style={styles.previewImage}
+                  resizeMode="cover"
                 />
               </View>
             ) : (
@@ -533,22 +544,32 @@ export default function EditProfileScreen() {
 
           {selectedCategory === 'own' ? (
             <View style={styles.avatarGrid}>
-              <TouchableOpacity
-                onPress={browseOwnDps}
-                disabled={browsing || loading}
-                style={[
-                  styles.browseTile,
-                  {
-                    backgroundColor: colors.surfaceSecondary,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Ionicons name="images-outline" size={22} color={colors.primary} />
-                <Text style={{ color: colors.primary, fontSize: fonts.xs, fontWeight: '600', marginTop: 4 }}>
-                  {browsing ? t.common.loading : t.profile.browseOwnDp}
-                </Text>
-              </TouchableOpacity>
+              {ownDps.length < MAX_OWN_DPS ? (
+                <TouchableOpacity
+                  onPress={browseOwnDps}
+                  disabled={browsing || loading}
+                  style={[
+                    styles.browseTile,
+                    {
+                      backgroundColor: colors.surfaceSecondary,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                  accessibilityLabel={t.profile.browseOwnDp}
+                >
+                  <Ionicons name="images-outline" size={22} color={colors.primary} />
+                  <Text
+                    style={{
+                      color: colors.primary,
+                      fontSize: fonts.xs,
+                      fontWeight: '600',
+                      marginTop: 4,
+                    }}
+                  >
+                    {browsing ? t.common.loading : t.profile.browseOwnDp}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
 
               {ownDps.map((item) => {
                 const isSelected =
@@ -563,16 +584,25 @@ export default function EditProfileScreen() {
                       style={[
                         styles.ownDpItem,
                         {
-                          borderColor: isSelected ? colors.primary : 'transparent',
-                          borderWidth: 3,
+                          borderColor: isSelected ? colors.primary : colors.border,
+                          borderWidth: isSelected ? 3 : 1,
+                          backgroundColor: colors.surfaceSecondary,
                         },
                       ]}
                       accessibilityState={{ selected: isSelected }}
                     >
-                      <Image
-                        source={{ uri: thumb, headers: authHeaders }}
-                        style={styles.ownDpImage}
-                      />
+                      {authHeaders ? (
+                        <Image
+                          source={{ uri: thumb, headers: authHeaders }}
+                          style={styles.ownDpImage}
+                          resizeMode="cover"
+                          accessibilityIgnoresInvertColors
+                        />
+                      ) : (
+                        <View style={[styles.ownDpImage, styles.ownDpPlaceholder]}>
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        </View>
+                      )}
                       {isSelected ? (
                         <View style={[styles.avatarCheck, { backgroundColor: colors.primary }]}>
                           <Ionicons name="checkmark" size={12} color="#FFF" />
@@ -582,10 +612,10 @@ export default function EditProfileScreen() {
                     <TouchableOpacity
                       onPress={() => deleteOwnDp(item.id)}
                       style={[styles.removeDpBtn, { backgroundColor: colors.danger }]}
-                      hitSlop={8}
+                      hitSlop={10}
                       accessibilityLabel={t.profile.removeOwnDp}
                     >
-                      <Ionicons name="close" size={12} color="#FFF" />
+                      <Ionicons name="close" size={14} color="#FFF" />
                     </TouchableOpacity>
                   </View>
                 );
@@ -754,9 +784,9 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   browseTile: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     borderWidth: 1,
     borderStyle: 'dashed',
     alignItems: 'center',
@@ -764,32 +794,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   ownDpWrap: {
-    width: 72,
-    height: 72,
+    width: 76,
+    height: 76,
     position: 'relative',
   },
   ownDpItem: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    padding: 2,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    overflow: 'hidden',
     position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   ownDpImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 34,
+  },
+  ownDpPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   removeDpBtn: {
     position: 'absolute',
-    top: -2,
-    right: -2,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    top: -4,
+    right: -4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 2,
+    zIndex: 3,
+    borderWidth: 2,
+    borderColor: '#FFF',
+    elevation: 3,
   },
   avatarCheck: {
     position: 'absolute',

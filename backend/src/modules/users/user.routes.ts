@@ -110,7 +110,7 @@ router.get(
 
 router.post(
   '/me/avatar-gallery',
-  avatarUpload.array('files', 12),
+  avatarUpload.array('files', 4),
   asyncHandler(async (req: AuthRequest, res) => {
     const files = req.files as Express.Multer.File[] | undefined;
     if (!files?.length) throw new AppError(400, 'No images uploaded.');
