@@ -13,6 +13,19 @@ const SCHEMA_PATCHES = [
   `ALTER TABLE "messages" ADD COLUMN IF NOT EXISTS "attachment" JSONB`,
   `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar_url" TEXT`,
   `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar_version" INTEGER NOT NULL DEFAULT 0`,
+  `CREATE TABLE IF NOT EXISTS "profile_gallery_photos" (
+      "id" TEXT PRIMARY KEY,
+      "user_id" TEXT NOT NULL,
+      "storage_key" TEXT NOT NULL,
+      "url" TEXT NOT NULL,
+      "file_name" TEXT NOT NULL,
+      "mime_type" TEXT NOT NULL,
+      "file_size" INTEGER NOT NULL,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "profile_gallery_photos_user_id_fkey"
+        FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`,
+  `CREATE INDEX IF NOT EXISTS "profile_gallery_photos_user_id_idx" ON "profile_gallery_photos"("user_id")`,
 ] as const;
 
 export async function ensureProductionSchema(): Promise<void> {

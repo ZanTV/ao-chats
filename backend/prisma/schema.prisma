@@ -88,8 +88,26 @@ model User {
   notifications         Notification[]   @relation("Recipient")
   sentNotifications     Notification[]   @relation("Actor")
   pushTokens            PushToken[]
+  profileGalleryPhotos  ProfileGalleryPhoto[]
 
   @@map("users")
+}
+
+/// User's browsed "My Own DP" photos (Agrohub-backed; select one as avatarUrl).
+model ProfileGalleryPhoto {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  storageKey String   @map("storage_key")
+  url        String
+  fileName   String   @map("file_name")
+  mimeType   String   @map("mime_type")
+  fileSize   Int      @map("file_size")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("profile_gallery_photos")
 }
 
 model Session {

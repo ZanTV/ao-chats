@@ -275,6 +275,81 @@ class ApiClient {
     });
   getBlockedUsers = () => this.request('/friends/blocked');
 
+  getAvatarGallery = () =>
+    this.request<{
+      photos: Array<{
+        id: string;
+        url: string;
+        storageKey: string;
+        fileName: string;
+        mimeType: string;
+        fileSize: number;
+        createdAt: string;
+      }>;
+    }>('/users/me/avatar-gallery');
+
+  uploadAvatarGallery = async (
+    files: Array<{
+      localUri: string;
+      mimeType: string;
+      fileName: string;
+    }>
+  ) => {
+    const token = await getAccessToken();
+    if (!token) throw new ApiError("You don't have permission to upload this file.", 'UNAUTHORIZED');
+
+    const form = new FormData();
+    const isWeb = typeof document !== 'undefined';
+    for (const file of files) {
+      if (isWeb) {
+        const blob = await fetch(file.localUri).then((r) => r.blob());
+        form.append('files', blob, file.fileName);
+      } else {
+        form.append('files', {
+          uri: file.localUri,
+          name: file.fileName,
+          type: file.mimeType,
+        } as unknown as Blob);
+      }
+    }
+
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/users/me/avatar-gallery`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    const body = await this.parseJsonSafe(response);
+    if (!response.ok) {
+      throw new ApiError(
+        formatApiError(body) || 'Upload failed. Try again.',
+        (body as { code?: string }).code,
+        response.status
+      );
+    }
+    return body as {
+      photos: Array<{
+        id: string;
+        url: string;
+        storageKey: string;
+        fileName: string;
+        mimeType: string;
+        fileSize: number;
+        createdAt: string;
+      }>;
+    };
+  };
+
+  deleteAvatarGalleryPhoto = (photoId: string) =>
+    this.request<{ success: boolean; id: string }>(`/users/me/avatar-gallery/${photoId}`, {
+      method: 'DELETE',
+    });
+
+  useAvatarGalleryPhoto = (photoId: string) =>
+    this.request(`/users/me/avatar-gallery/${photoId}/use`, {
+      method: 'POST',
+      body: '{}',
+    });
+
   // Conversations
   getConversations = () => this.request('/conversations');
   getOrCreateConversation = (userId: string) =>

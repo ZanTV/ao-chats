@@ -100,6 +100,68 @@ router.delete(
   })
 );
 
+router.get(
+  '/me/avatar-gallery',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const photos = await userService.listAvatarGallery(req.userId!);
+    res.json({ photos });
+  })
+);
+
+router.post(
+  '/me/avatar-gallery',
+  avatarUpload.array('files', 12),
+  asyncHandler(async (req: AuthRequest, res) => {
+    const files = req.files as Express.Multer.File[] | undefined;
+    if (!files?.length) throw new AppError(400, 'No images uploaded.');
+    const photos = [];
+    try {
+      for (const file of files) {
+        const photo = await userService.addAvatarGalleryPhoto(req.userId!, {
+          buffer: file.buffer,
+          originalName: file.originalname || 'avatar.jpg',
+          mimeType: file.mimetype,
+        });
+        photos.push(photo);
+      }
+      res.status(201).json({ photos });
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      if ((err as { code?: string })?.code === 'LIMIT_FILE_SIZE') {
+        throw new AppError(400, 'This file is too large to upload.');
+      }
+      throw err;
+    }
+  })
+);
+
+router.delete(
+  '/me/avatar-gallery/:photoId',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const result = await userService.removeAvatarGalleryPhoto(
+      req.userId!,
+      paramId(req.params.photoId)
+    );
+    res.json(result);
+  })
+);
+
+router.post(
+  '/me/avatar-gallery/:photoId/use',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const profile = await userService.useAvatarGalleryPhoto(
+      req.userId!,
+      paramId(req.params.photoId)
+    );
+    emitProfileUpdated(
+      req.userId!,
+      profile.avatarVersion ?? 0,
+      profile.avatarUrl ?? null
+    );
+    res.json(profile);
+  })
+);
+
 router.post(
   '/push-token',
   asyncHandler(async (req: AuthRequest, res) => {

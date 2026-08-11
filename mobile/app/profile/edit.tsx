@@ -26,17 +26,20 @@ import { loadAvatarCategories, loadUniversities } from '../../src/services/signu
 import { validateUsername, validateMobileNumber } from '../../src/utils/validation';
 import { invalidatePublicProfile, setCachedPublicProfile } from '../../src/cache/profileCache';
 import { applyAvatarSyncUpdate } from '../../src/profile/avatarSyncStore';
-import { hasValidAvatarUrl } from '../../src/utils/avatarUrl';
-import {
-  addOwnDpFromAssets,
-  loadOwnDpLibrary,
-  ownDpToPending,
-  removeOwnDpItem,
-  type OwnDpItem,
-} from '../../src/profile/ownDpLibrary';
-import { uploadProfileAvatar } from '../../src/attachments/uploadProfileAvatar';
+import { hasValidAvatarUrl, resolveAvatarDisplayUrl } from '../../src/utils/avatarUrl';
+import { getAccessToken } from '../../src/services/storage';
 import { ProfileSaveSuccessToast } from '../../src/components/ProfileSaveSuccessToast';
 import { Spacing, BorderRadius } from '../../src/theme';
+
+type GalleryPhoto = {
+  id: string;
+  url: string;
+  storageKey: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+};
 
 const AVATAR_CATEGORIES = [
   { key: 'animals', labelKey: 'animals' as const },
@@ -81,8 +84,9 @@ export default function EditProfileScreen() {
   const [selectedCategory, setSelectedCategory] = useState(
     hasValidAvatarUrl(user?.avatarUrl) ? 'own' : 'animals'
   );
-  const [ownDps, setOwnDps] = useState<OwnDpItem[]>([]);
+  const [ownDps, setOwnDps] = useState<GalleryPhoto[]>([]);
   const [selectedOwnDpId, setSelectedOwnDpId] = useState<string | null>(null);
+  const [authHeaders, setAuthHeaders] = useState<Record<string, string>>();
   const [loading, setLoading] = useState(false);
   const [browsing, setBrowsing] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -105,11 +109,23 @@ export default function EditProfileScreen() {
     [t]
   );
 
+  const refreshGallery = useCallback(async () => {
+    try {
+      const res = await api.getAvatarGallery();
+      setOwnDps(res.photos || []);
+    } catch {
+      setOwnDps([]);
+    }
+  }, []);
+
   useEffect(() => {
     loadAvatarCategories().then(setAvatarCategories);
     loadUniversities().then(setUniversities);
-    loadOwnDpLibrary().then(setOwnDps);
-  }, []);
+    void refreshGallery();
+    getAccessToken().then((token) => {
+      if (token) setAuthHeaders({ Authorization: `Bearer ${token}` });
+    });
+  }, [refreshGallery]);
 
   useEffect(() => {
     const version = user?.avatarVersion ?? 0;
@@ -136,6 +152,17 @@ export default function EditProfileScreen() {
   const showRealPhotoPreview =
     !selectedOwnDp && hasValidAvatarUrl(user?.avatarUrl) && !previewAoAvatar;
 
+  /** Tick gallery item that matches current active profile photo URL */
+  const activeGalleryId = useMemo(() => {
+    if (!hasValidAvatarUrl(user?.avatarUrl) || previewAoAvatar || selectedOwnDpId) return null;
+    const current = resolveAvatarDisplayUrl(user?.avatarUrl, user?.avatarVersion);
+    const match = ownDps.find((p) => {
+      const a = resolveAvatarDisplayUrl(p.url, user?.avatarVersion);
+      return a && current && a.split('?')[0] === current.split('?')[0];
+    });
+    return match?.id || null;
+  }, [ownDps, user?.avatarUrl, user?.avatarVersion, previewAoAvatar, selectedOwnDpId]);
+
   const browseOwnDps = async () => {
     setBrowsing(true);
     try {
@@ -151,11 +178,17 @@ export default function EditProfileScreen() {
         selectionLimit: 12,
       });
       if (result.canceled || !result.assets?.length) return;
-      const next = await addOwnDpFromAssets(result.assets);
-      setOwnDps(next);
-      if (next[0]) {
-        selectOwnDp(next[0].id);
-      }
+
+      const uploaded = await api.uploadAvatarGallery(
+        result.assets.map((asset) => ({
+          localUri: asset.uri,
+          mimeType: asset.mimeType || 'image/jpeg',
+          fileName: asset.fileName || 'avatar.jpg',
+        }))
+      );
+      await refreshGallery();
+      const first = uploaded.photos?.[0];
+      if (first?.id) selectOwnDp(first.id);
       setSelectedCategory('own');
     } catch (err) {
       Alert.alert(t.common.error, err instanceof Error ? err.message : t.profile.photoFailed);
@@ -170,6 +203,25 @@ export default function EditProfileScreen() {
     aoDraftPreviewRef.current = false;
     setPreviewAoAvatar(false);
     setNeedsAvatarPick(false);
+  };
+
+  const deleteOwnDp = (id: string) => {
+    Alert.alert(t.profile.removeOwnDp, t.profile.removeOwnDpConfirm, [
+      { text: t.common.cancel, style: 'cancel' },
+      {
+        text: t.common.delete,
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.deleteAvatarGalleryPhoto(id);
+            setOwnDps((prev) => prev.filter((p) => p.id !== id));
+            if (selectedOwnDpId === id) setSelectedOwnDpId(null);
+          } catch (err) {
+            Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
+          }
+        },
+      },
+    ]);
   };
 
   const confirmRemoveCustomPhoto = async () => {
@@ -217,21 +269,6 @@ export default function EditProfileScreen() {
     aoDraftPreviewRef.current = true;
     setPreviewAoAvatar(true);
     setNeedsAvatarPick(false);
-  };
-
-  const deleteOwnDp = (id: string) => {
-    Alert.alert(t.profile.removeOwnDp, t.profile.removeOwnDpConfirm, [
-      { text: t.common.cancel, style: 'cancel' },
-      {
-        text: t.common.delete,
-        style: 'destructive',
-        onPress: async () => {
-          const next = await removeOwnDpItem(id);
-          setOwnDps(next);
-          if (selectedOwnDpId === id) setSelectedOwnDpId(null);
-        },
-      },
-    ]);
   };
 
   const hasChanges =
@@ -287,9 +324,11 @@ export default function EditProfileScreen() {
 
     setLoading(true);
     try {
-      // Apply selected own DP as profile photo first
+      // Apply selected Agrohub gallery photo as profile — replaces previous avatarUrl in DB
       if (selectedOwnDp) {
-        const updatedPhoto = await uploadProfileAvatar(ownDpToPending(selectedOwnDp));
+        const updatedPhoto = (await api.useAvatarGalleryPhoto(selectedOwnDp.id)) as Parameters<
+          typeof updateUser
+        >[0];
         updateUser(updatedPhoto);
         if (updatedPhoto.id) {
           applyAvatarSyncUpdate({
@@ -300,11 +339,11 @@ export default function EditProfileScreen() {
           invalidatePublicProfile(updatedPhoto.id);
           setCachedPublicProfile({
             id: updatedPhoto.id,
-            username: updatedPhoto.username,
-            firstName: updatedPhoto.firstName,
-            lastName: updatedPhoto.lastName,
+            username: updatedPhoto.username || '',
+            firstName: updatedPhoto.firstName || '',
+            lastName: updatedPhoto.lastName || '',
             avatarId: updatedPhoto.avatarId || 'avatar-1',
-            avatarUrl: updatedPhoto.avatarUrl,
+            avatarUrl: updatedPhoto.avatarUrl ?? null,
             avatarVersion: updatedPhoto.avatarVersion,
             university: updatedPhoto.university,
             course: updatedPhoto.course,
@@ -392,7 +431,13 @@ export default function EditProfileScreen() {
                   { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
                 ]}
               >
-                <Image source={{ uri: selectedOwnDp.localUri }} style={styles.previewImage} />
+                <Image
+                  source={{
+                    uri: resolveAvatarDisplayUrl(selectedOwnDp.url, user?.avatarVersion) || selectedOwnDp.url,
+                    headers: authHeaders,
+                  }}
+                  style={styles.previewImage}
+                />
               </View>
             ) : (
               <Avatar
@@ -476,28 +521,43 @@ export default function EditProfileScreen() {
               </TouchableOpacity>
 
               {ownDps.map((item) => {
-                const isSelected = selectedOwnDpId === item.id;
+                const isSelected =
+                  selectedOwnDpId === item.id ||
+                  (!selectedOwnDpId && activeGalleryId === item.id);
+                const thumb =
+                  resolveAvatarDisplayUrl(item.url, user?.avatarVersion) || item.url;
                 return (
-                  <TouchableOpacity
-                    key={item.id}
-                    onPress={() => selectOwnDp(item.id)}
-                    onLongPress={() => deleteOwnDp(item.id)}
-                    style={[
-                      styles.ownDpItem,
-                      {
-                        borderColor: isSelected ? colors.primary : 'transparent',
-                        borderWidth: 3,
-                      },
-                    ]}
-                    accessibilityState={{ selected: isSelected }}
-                  >
-                    <Image source={{ uri: item.localUri }} style={styles.ownDpImage} />
-                    {isSelected ? (
-                      <View style={[styles.avatarCheck, { backgroundColor: colors.primary }]}>
-                        <Ionicons name="checkmark" size={12} color="#FFF" />
-                      </View>
-                    ) : null}
-                  </TouchableOpacity>
+                  <View key={item.id} style={styles.ownDpWrap}>
+                    <TouchableOpacity
+                      onPress={() => selectOwnDp(item.id)}
+                      style={[
+                        styles.ownDpItem,
+                        {
+                          borderColor: isSelected ? colors.primary : 'transparent',
+                          borderWidth: 3,
+                        },
+                      ]}
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <Image
+                        source={{ uri: thumb, headers: authHeaders }}
+                        style={styles.ownDpImage}
+                      />
+                      {isSelected ? (
+                        <View style={[styles.avatarCheck, { backgroundColor: colors.primary }]}>
+                          <Ionicons name="checkmark" size={12} color="#FFF" />
+                        </View>
+                      ) : null}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => deleteOwnDp(item.id)}
+                      style={[styles.removeDpBtn, { backgroundColor: colors.danger }]}
+                      hitSlop={8}
+                      accessibilityLabel={t.profile.removeOwnDp}
+                    >
+                      <Ionicons name="close" size={12} color="#FFF" />
+                    </TouchableOpacity>
+                  </View>
                 );
               })}
             </View>
@@ -674,6 +734,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
+  ownDpWrap: {
+    width: 72,
+    height: 72,
+    position: 'relative',
+  },
   ownDpItem: {
     width: 72,
     height: 72,
@@ -685,6 +750,17 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 34,
+  },
+  removeDpBtn: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
   avatarCheck: {
     position: 'absolute',

@@ -174,10 +174,109 @@ export class UserService {
       mimeType: file.mimeType,
     });
 
+    // Replace previous avatarUrl in DB with the new Agrohub-backed proxy URL
     const user = await prisma.user.update({
       where: { id: userId },
       data: {
         avatarUrl: saved.url,
+        avatarVersion: (current.avatarVersion || 0) + 1,
+      },
+      select: ownerProfileSelect,
+    });
+
+    await cacheDel(CacheKeys.user(userId), `${CacheKeys.user(userId)}:owner`);
+    return user;
+  }
+
+  async listAvatarGallery(userId: string) {
+    const photos = await prisma.profileGalleryPhoto.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 24,
+    });
+    return photos.map((p) => ({
+      id: p.id,
+      url: p.url,
+      storageKey: p.storageKey,
+      fileName: p.fileName,
+      mimeType: p.mimeType,
+      fileSize: p.fileSize,
+      createdAt: p.createdAt.toISOString(),
+    }));
+  }
+
+  async addAvatarGalleryPhoto(
+    userId: string,
+    file: { buffer: Buffer; originalName: string; mimeType: string }
+  ) {
+    const current = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, isSystemAccount: true },
+    });
+    if (!current) throw new AppError(404, 'User not found');
+    if (current.isSystemAccount) throw new AppError(403, 'System accounts cannot be modified');
+
+    const count = await prisma.profileGalleryPhoto.count({ where: { userId } });
+    if (count >= 24) {
+      throw new AppError(400, 'My Own DP library is full (max 24 photos).');
+    }
+
+    const saved = await uploadService.saveProfileAvatar({
+      uploaderId: userId,
+      buffer: file.buffer,
+      originalName: file.originalName,
+      mimeType: file.mimeType,
+    });
+
+    const photo = await prisma.profileGalleryPhoto.create({
+      data: {
+        userId,
+        storageKey: saved.storageKey,
+        url: saved.url,
+        fileName: file.originalName || 'avatar.jpg',
+        mimeType: saved.mimeType || file.mimeType,
+        fileSize: saved.fileSize,
+      },
+    });
+
+    return {
+      id: photo.id,
+      url: photo.url,
+      storageKey: photo.storageKey,
+      fileName: photo.fileName,
+      mimeType: photo.mimeType,
+      fileSize: photo.fileSize,
+      createdAt: photo.createdAt.toISOString(),
+    };
+  }
+
+  async removeAvatarGalleryPhoto(userId: string, photoId: string) {
+    const photo = await prisma.profileGalleryPhoto.findFirst({
+      where: { id: photoId, userId },
+    });
+    if (!photo) throw new AppError(404, 'Photo not found');
+    await prisma.profileGalleryPhoto.delete({ where: { id: photo.id } });
+    return { success: true, id: photo.id };
+  }
+
+  /**
+   * Set an Agrohub gallery photo as the active profile avatar.
+   * Clears/replaces previous avatarUrl in DB and bumps avatarVersion.
+   */
+  async useAvatarGalleryPhoto(userId: string, photoId: string) {
+    const current = await prisma.user.findUnique({ where: { id: userId } });
+    if (!current) throw new AppError(404, 'User not found');
+    if (current.isSystemAccount) throw new AppError(403, 'System accounts cannot be modified');
+
+    const photo = await prisma.profileGalleryPhoto.findFirst({
+      where: { id: photoId, userId },
+    });
+    if (!photo) throw new AppError(404, 'Photo not found');
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        avatarUrl: photo.url,
         avatarVersion: (current.avatarVersion || 0) + 1,
       },
       select: ownerProfileSelect,
