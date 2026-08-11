@@ -4,6 +4,8 @@ import { router } from 'expo-router';
 import { Avatar } from './Avatar';
 import { ActionMenuSheet } from './ActionMenuSheet';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useAvatarSyncStore } from '../profile/avatarSyncStore';
+import { resolveEffectiveAvatar } from '../profile/resolveAvatar';
 
 type Props = {
   userId: string;
@@ -23,7 +25,7 @@ type Props = {
 
 /**
  * Shared profile-photo tap → action sheet → photo viewer.
- * Structured so a future "View Status" action can be added without redesign.
+ * Avatar rendering uses the unified resolver (photo > AO > default).
  */
 export function ProfilePhotoActions({
   userId,
@@ -43,6 +45,15 @@ export function ProfilePhotoActions({
   const { colors, fonts, t } = useSettingsStore();
   const [open, setOpen] = useState(false);
 
+  // Keep navigation params aligned with version-gated sync projection
+  useAvatarSyncStore((s) => (userId ? s.byUserId[userId] : undefined));
+  const resolved = resolveEffectiveAvatar({
+    userId,
+    avatarId,
+    avatarUrl: imageUrl,
+    avatarVersion: imageVersion,
+  });
+
   const items = useMemo(
     () => [
       {
@@ -53,9 +64,9 @@ export function ProfilePhotoActions({
             pathname: '/profile/photo-view',
             params: {
               userId,
-              avatarId: avatarId || 'avatar-1',
-              imageUrl: imageUrl || '',
-              imageVersion: String(imageVersion ?? 0),
+              avatarId: resolved.avatarId,
+              imageUrl: resolved.avatarUrl || '',
+              imageVersion: String(resolved.version ?? 0),
               firstName: firstName || '',
               lastName: lastName || '',
               username: username || '',
@@ -65,7 +76,7 @@ export function ProfilePhotoActions({
       },
       // Future: { key: 'status', label: t.profile.viewStatus, onPress: ... }
     ],
-    [t, userId, avatarId, imageUrl, imageVersion, firstName, lastName, username]
+    [t, userId, resolved.avatarId, resolved.avatarUrl, resolved.version, firstName, lastName, username]
   );
 
   return (
@@ -82,7 +93,7 @@ export function ProfilePhotoActions({
       >
         <Avatar
           userId={userId}
-          avatarId={avatarId || 'avatar-1'}
+          avatarId={resolved.avatarId}
           imageUrl={imageUrl}
           imageVersion={imageVersion}
           size={size}

@@ -116,6 +116,7 @@ export function applyAvatarSyncUpdate(input: {
 
 /**
  * Single precedence rule: valid avatarUrl (sync or props) wins over avatarId.
+ * Prefer resolveAvatar / resolveEffectiveAvatar for typed photo|ao|default output.
  * Callers still pass avatarId separately for AO fallback rendering.
  */
 export function resolveAvatarProjection(

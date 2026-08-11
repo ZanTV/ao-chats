@@ -10,8 +10,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { AvatarColors, AvatarEmojis, BorderRadius } from '../theme';
 import { getAccessToken } from '../services/storage';
-import { normalizeAvatarUrl, resolveAvatarDisplayUrl } from '../utils/avatarUrl';
-import { useAvatarSyncStore } from '../profile/avatarSyncStore';
+import { resolveAvatarDisplayUrl } from '../utils/avatarUrl';
+import { useResolvedAvatar } from '../profile/useResolvedAvatar';
 
 interface AvatarProps {
   avatarId: string;
@@ -41,8 +41,9 @@ function isLocalUri(url: string): boolean {
 }
 
 /**
- * Precedence: valid avatarUrl (realtime sync or props) > AO avatarId emoji.
- * Real photo covers AO underlay once loaded — AO must not stay as the visible avatar.
+ * Primary avatar rendering boundary.
+ * Precedence (via resolveAvatar): REAL PHOTO > AO avatarId > default.
+ * Realtime sync is version-gated so stale props cannot override a newer photo.
  */
 export function Avatar({
   avatarId,
@@ -55,27 +56,21 @@ export function Avatar({
   isVerified,
   style,
 }: AvatarProps) {
-  const color = AvatarColors[avatarId] || AvatarColors['avatar-30'];
-  const emoji = AvatarEmojis[avatarId] || '💠';
+  const resolved = useResolvedAvatar({
+    userId,
+    avatarId,
+    avatarUrl: imageUrl,
+    avatarVersion: imageVersion,
+  });
 
-  const synced = useAvatarSyncStore((s) =>
-    userId ? s.byUserId[userId] : undefined
-  );
+  const renderAvatarId = resolved.avatarId;
+  const color = AvatarColors[renderAvatarId] || AvatarColors['avatar-30'];
+  const emoji = AvatarEmojis[renderAvatarId] || '💠';
 
-  const propVersion =
-    typeof imageVersion === 'number' && Number.isFinite(imageVersion)
-      ? imageVersion
-      : 0;
-  const propUrl = normalizeAvatarUrl(imageUrl);
-
-  let effectiveUrl = propUrl;
-  let effectiveVersion = propVersion;
-  if (synced?.urlKnown) {
-    if (synced.avatarVersion >= propVersion) {
-      effectiveUrl = normalizeAvatarUrl(synced.avatarUrl);
-      effectiveVersion = synced.avatarVersion;
-    }
-  }
+  const effectiveUrl = resolved.avatarUrl;
+  const effectiveVersion = resolved.version;
+  /** Original prop URL — used only if a local preview fails and we fall back to the server proxy. */
+  const propFallbackUrl = imageUrl;
 
   const displayUrl = resolveAvatarDisplayUrl(effectiveUrl, effectiveVersion);
   const needsAuth = Boolean(displayUrl && !isLocalUri(displayUrl));
@@ -265,8 +260,11 @@ export function Avatar({
               }}
               onError={() => {
                 // Local device preview failed — fall back to server proxy URL from props
-                if (baseUrl && isLocalUri(baseUrl) && propUrl) {
-                  const fallback = resolveAvatarDisplayUrl(propUrl, propVersion);
+                if (baseUrl && isLocalUri(baseUrl) && propFallbackUrl) {
+                  const fallback = resolveAvatarDisplayUrl(
+                    propFallbackUrl,
+                    effectiveVersion
+                  );
                   if (fallback && fallback !== baseUrl) {
                     setPhotoCoversAo(false);
                     photoFade.setValue(0);
@@ -275,6 +273,7 @@ export function Avatar({
                     return;
                   }
                 }
+                // Keep AO underlay; do not clear avatarUrl in app state on transient load failure
                 setBaseFailed(true);
                 setPhotoCoversAo(false);
                 photoFade.setValue(0);

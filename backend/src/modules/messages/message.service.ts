@@ -38,9 +38,18 @@ const replyToSelect = {
   sender: { select: { firstName: true } },
 } as const;
 
+const senderAvatarSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  avatarId: true,
+  avatarUrl: true,
+  avatarVersion: true,
+} as const;
+
 const messageListInclude = (userId: string) => ({
   sender: {
-    select: { id: true, firstName: true, lastName: true, avatarId: true },
+    select: senderAvatarSelect,
   },
   replyTo: { select: replyToSelect },
   reactions: {
@@ -217,7 +226,7 @@ export class MessageService {
         },
         include: {
           sender: {
-            select: { id: true, firstName: true, lastName: true, avatarId: true },
+            select: senderAvatarSelect,
           },
           replyTo: { select: replyToSelect },
           reactions: {
@@ -571,7 +580,7 @@ export class MessageService {
       update: {},
       include: {
         message: {
-          include: { sender: { select: { id: true, firstName: true, avatarId: true } } },
+          include: { sender: { select: senderAvatarSelect } },
         },
       },
     });
@@ -603,7 +612,7 @@ export class MessageService {
       include: {
         message: {
           include: {
-            sender: { select: { id: true, firstName: true, lastName: true, avatarId: true } },
+            sender: { select: senderAvatarSelect },
             conversation: { select: { id: true } },
           },
         },
@@ -690,7 +699,7 @@ export class MessageService {
       include: {
         message: {
           include: {
-            sender: { select: { id: true, firstName: true, avatarId: true } },
+            sender: { select: senderAvatarSelect },
           },
         },
         pinnedBy: { select: { id: true, firstName: true } },

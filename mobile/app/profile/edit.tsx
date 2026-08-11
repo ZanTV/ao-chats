@@ -9,13 +9,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Input } from '../../src/components/Input';
-import { Button } from '../../src/components/Button';
 import { Avatar } from '../../src/components/Avatar';
 import { UniversityPicker } from '../../src/components/UniversityPicker';
 import { ConfirmDialog } from '../../src/components/ConfirmDialog';
@@ -27,6 +27,7 @@ import { validateUsername, validateMobileNumber } from '../../src/utils/validati
 import { invalidatePublicProfile, setCachedPublicProfile } from '../../src/cache/profileCache';
 import { applyAvatarSyncUpdate } from '../../src/profile/avatarSyncStore';
 import { hasValidAvatarUrl, resolveAvatarDisplayUrl } from '../../src/utils/avatarUrl';
+import { resolveAvatar } from '../../src/profile/resolveAvatar';
 import { getAccessToken } from '../../src/services/storage';
 import { ProfileSaveSuccessToast } from '../../src/components/ProfileSaveSuccessToast';
 import { Spacing, BorderRadius } from '../../src/theme';
@@ -149,8 +150,14 @@ export default function EditProfileScreen() {
     [ownDps, selectedOwnDpId]
   );
 
+  // Current saved profile visual (ignores AO draft / Own DP selection preview)
+  const savedResolved = resolveAvatar({
+    avatarId: user?.avatarId || selectedAvatarId,
+    avatarUrl: user?.avatarUrl,
+    avatarVersion: user?.avatarVersion,
+  });
   const showRealPhotoPreview =
-    !selectedOwnDp && hasValidAvatarUrl(user?.avatarUrl) && !previewAoAvatar;
+    !selectedOwnDp && savedResolved.type === 'photo' && !previewAoAvatar;
 
   /** Tick gallery item that matches current active profile photo URL */
   const activeGalleryId = useMemo(() => {
@@ -412,13 +419,36 @@ export default function EditProfileScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={[styles.headerSide, styles.headerSideLeft]}
+          hitSlop={8}
+        >
           <Text style={{ color: colors.textSecondary, fontSize: fonts.md }}>{t.profile.cancel}</Text>
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text, fontSize: fonts.lg }]}>
+        <Text style={[styles.headerTitle, { color: colors.text, fontSize: fonts.lg }]} numberOfLines={1}>
           {t.profile.edit}
         </Text>
-        <View style={{ width: 60 }} />
+        {hasChanges ? (
+          <TouchableOpacity
+            onPress={handleSave}
+            disabled={loading}
+            style={[styles.headerSide, styles.headerSideRight]}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={t.profile.save}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Text style={[styles.headerSave, { color: colors.primary, fontSize: fonts.md }]}>
+                {t.profile.save}
+              </Text>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <View style={[styles.headerSide, styles.headerSideRight]} />
+        )}
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
@@ -643,14 +673,6 @@ export default function EditProfileScreen() {
           </Text>
 
           <Input label={t.profile.status} value={statusMessage} onChangeText={setStatusMessage} maxLength={100} />
-
-          <Button
-            title={t.profile.save}
-            onPress={handleSave}
-            loading={loading}
-            disabled={!hasChanges}
-            fullWidth
-          />
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -692,7 +714,14 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     paddingBottom: Spacing.sm,
   },
-  headerTitle: { fontWeight: '700' },
+  headerSide: {
+    minWidth: 64,
+    justifyContent: 'center',
+  },
+  headerSideLeft: { alignItems: 'flex-start' },
+  headerSideRight: { alignItems: 'flex-end' },
+  headerTitle: { fontWeight: '700', flex: 1, textAlign: 'center', marginHorizontal: Spacing.sm },
+  headerSave: { fontWeight: '700' },
   scroll: { padding: Spacing.lg, paddingBottom: Spacing.xxl },
   avatarSection: { alignItems: 'center', marginBottom: Spacing.md },
   previewRing: {

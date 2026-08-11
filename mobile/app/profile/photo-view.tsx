@@ -22,7 +22,11 @@ import {
   type PublicProfileCache,
 } from '../../src/cache/profileCache';
 import { hasValidAvatarUrl, resolveAvatarDisplayUrl } from '../../src/utils/avatarUrl';
-import { useAvatarSyncStore } from '../../src/profile/avatarSyncStore';
+import {
+  resolveAvatarProjection,
+  useAvatarSyncStore,
+} from '../../src/profile/avatarSyncStore';
+import { resolveAvatar } from '../../src/profile/resolveAvatar';
 import { Spacing } from '../../src/theme';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -106,18 +110,19 @@ export default function ProfilePhotoViewScreen() {
     };
   }, [userId, me?.id]);
 
-  const synced = useAvatarSyncStore((s) => (userId ? s.byUserId[userId] : undefined));
-  const resolvedUrl =
-    synced?.urlKnown && typeof synced.avatarVersion === 'number'
-      ? synced.avatarVersion >= (profile?.avatarVersion ?? 0)
-        ? synced.avatarUrl
-        : profile?.avatarUrl
-      : profile?.avatarUrl;
-  const resolvedVersion =
-    synced?.urlKnown && synced.avatarVersion >= (profile?.avatarVersion ?? 0)
-      ? synced.avatarVersion
-      : profile?.avatarVersion;
-  const displayUrl = resolveAvatarDisplayUrl(resolvedUrl, resolvedVersion);
+  // Subscribe so realtime avatar updates re-render this viewer
+  useAvatarSyncStore((s) => (userId ? s.byUserId[userId] : undefined));
+  const projected = resolveAvatarProjection(
+    userId,
+    profile?.avatarUrl,
+    profile?.avatarVersion
+  );
+  const resolved = resolveAvatar({
+    avatarId: profile?.avatarId,
+    avatarUrl: projected.avatarUrl,
+    avatarVersion: projected.avatarVersion,
+  });
+  const displayUrl = resolveAvatarDisplayUrl(resolved.avatarUrl, resolved.version);
 
   useEffect(() => {
     setImageFailed(false);
@@ -174,8 +179,9 @@ export default function ProfilePhotoViewScreen() {
         ) : (
           <Avatar
             userId={profile.id}
-            avatarId={profile.avatarId || 'avatar-1'}
+            avatarId={resolved.avatarId}
             imageUrl={null}
+            imageVersion={resolved.version}
             size={Math.min(SCREEN_W * 0.55, 220)}
           />
         )}
