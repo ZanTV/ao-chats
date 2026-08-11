@@ -295,6 +295,43 @@ export class AgrohubStorageClient {
   }
 
   /**
+   * Best-effort remote delete. Never throws for missing objects — gallery DB row is source of truth for UI.
+   */
+  async deleteObject(storageKey: string): Promise<void> {
+    const key = normalizeStorageKey(storageKey);
+    if (!key) return;
+
+    const attempts: Array<() => Promise<Response>> = [
+      () =>
+        storageFetch(`${storageBaseUrl()}/api/delete`, {
+          method: 'POST',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ storageKey: key }),
+        }),
+      () =>
+        storageFetch(`${storageBaseUrl()}/api/object`, {
+          method: 'DELETE',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ storageKey: key }),
+        }),
+      () =>
+        storageFetch(`${storageBaseUrl()}/api/files?key=${encodeURIComponent(key)}`, {
+          method: 'DELETE',
+          headers: authHeaders(),
+        }),
+    ];
+
+    for (const run of attempts) {
+      try {
+        const res = await run();
+        if (res.ok || res.status === 404) return;
+      } catch {
+        // try next endpoint shape
+      }
+    }
+  }
+
+  /**
    * Fetch object bytes via signed URL. Forwards Range when provided.
    * Never returns the signed URL itself.
    */

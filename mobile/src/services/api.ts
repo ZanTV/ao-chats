@@ -340,7 +340,27 @@ class ApiClient {
   };
 
   deleteAvatarGalleryPhoto = (photoId: string) =>
-    this.request<{ success: boolean; id: string }>(`/users/me/avatar-gallery/${photoId}`, {
+    this.request<{
+      success: boolean;
+      id: string;
+      clearedAvatar?: boolean;
+      profile?: {
+        id: string;
+        avatarUrl?: string | null;
+        avatarVersion?: number;
+        avatarId?: string;
+        username?: string;
+        firstName?: string;
+        lastName?: string;
+        university?: string | null;
+        course?: string | null;
+        bio?: string | null;
+        status?: string;
+        statusMessage?: string | null;
+        lastSeen?: string | null;
+        isVerified?: boolean;
+      } | null;
+    }>(`/users/me/avatar-gallery/${photoId}`, {
       method: 'DELETE',
     });
 

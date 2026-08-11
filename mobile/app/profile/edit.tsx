@@ -96,6 +96,8 @@ export default function EditProfileScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [clearingPhoto, setClearingPhoto] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [pendingDeleteOwnDpId, setPendingDeleteOwnDpId] = useState<string | null>(null);
+  const [deletingOwnDp, setDeletingOwnDp] = useState(false);
   const [needsAvatarPick, setNeedsAvatarPick] = useState(false);
   const [avatarTouched, setAvatarTouched] = useState(false);
   const [previewAoAvatar, setPreviewAoAvatar] = useState(
@@ -222,23 +224,48 @@ export default function EditProfileScreen() {
   };
 
   const deleteOwnDp = (id: string) => {
-    Alert.alert(t.profile.removeOwnDp, t.profile.removeOwnDpConfirm, [
-      { text: t.common.cancel, style: 'cancel' },
-      {
-        text: t.common.delete,
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.deleteAvatarGalleryPhoto(id);
-            setOwnDps((prev) => prev.filter((p) => p.id !== id));
-            if (selectedOwnDpId === id) setSelectedOwnDpId(null);
-            await refreshGallery();
-          } catch (err) {
-            Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
-          }
-        },
-      },
-    ]);
+    setPendingDeleteOwnDpId(id);
+  };
+
+  const confirmDeleteOwnDp = async () => {
+    const id = pendingDeleteOwnDpId;
+    if (!id || deletingOwnDp) return;
+    setDeletingOwnDp(true);
+    // Remove from UI immediately so ✕ feels permanent
+    setOwnDps((prev) => prev.filter((p) => p.id !== id));
+    if (selectedOwnDpId === id) setSelectedOwnDpId(null);
+    setPendingDeleteOwnDpId(null);
+    try {
+      const result = await api.deleteAvatarGalleryPhoto(id);
+
+      if (result.clearedAvatar && result.profile) {
+        updateUser(result.profile as Parameters<typeof updateUser>[0]);
+        applyAvatarSyncUpdate({
+          userId: result.profile.id,
+          avatarUrl: null,
+          avatarVersion: result.profile.avatarVersion ?? 0,
+        });
+        invalidatePublicProfile(result.profile.id);
+        setCachedPublicProfile({
+          id: result.profile.id,
+          username: result.profile.username || '',
+          firstName: result.profile.firstName || '',
+          lastName: result.profile.lastName || '',
+          avatarId: result.profile.avatarId || selectedAvatarId || 'avatar-1',
+          avatarUrl: null,
+          avatarVersion: result.profile.avatarVersion,
+        });
+        setPreviewAoAvatar(true);
+        aoDraftPreviewRef.current = false;
+      }
+
+      await refreshGallery();
+    } catch (err) {
+      await refreshGallery();
+      Alert.alert(t.common.error, err instanceof Error ? err.message : t.common.error);
+    } finally {
+      setDeletingOwnDp(false);
+    }
   };
 
   const confirmRemoveCustomPhoto = async () => {
@@ -705,6 +732,22 @@ export default function EditProfileScreen() {
           <Input label={t.profile.status} value={statusMessage} onChangeText={setStatusMessage} maxLength={100} />
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <ConfirmDialog
+        visible={Boolean(pendingDeleteOwnDpId)}
+        title={t.profile.removeOwnDp}
+        message={t.profile.removeOwnDpConfirm}
+        confirmLabel={t.common.delete}
+        cancelLabel={t.common.cancel}
+        destructive
+        busy={deletingOwnDp}
+        onConfirm={confirmDeleteOwnDp}
+        onCancel={() => {
+          if (!deletingOwnDp) setPendingDeleteOwnDpId(null);
+        }}
+        colors={colors}
+        fonts={fonts}
+      />
 
       <ConfirmDialog
         visible={showRemoveConfirm}

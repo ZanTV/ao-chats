@@ -351,6 +351,39 @@ export class UploadService {
   }
 
   /**
+   * Permanently remove a stored profile/chat object (local + best-effort Agrohub).
+   * Missing local/remote files are ignored so gallery delete always succeeds in DB.
+   */
+  async deleteStoredFile(storageKey: string): Promise<void> {
+    const key = String(storageKey || '')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/\.\./g, '');
+    if (!key) return;
+
+    try {
+      if (localFileExists(key)) {
+        fs.unlinkSync(resolveUploadPath(key));
+      }
+    } catch {
+      // ignore local delete failures
+    }
+
+    if (
+      isAgrohubChatStorageKey(key) ||
+      key.startsWith('profiles/') ||
+      config.profileStorage.provider === 'agrohub' ||
+      config.mediaStorage.provider === 'agrohub'
+    ) {
+      try {
+        await agrohubStorage.deleteObject(key);
+      } catch {
+        // ignore remote delete failures — DB row removal is what clears My Own DP UI
+      }
+    }
+  }
+
+  /**
    * Existence check used by MessageService — no re-upload.
    * Dual-read: Agrohub chat keys → storage API; legacy → local disk.
    */

@@ -255,8 +255,52 @@ export class UserService {
       where: { id: photoId, userId },
     });
     if (!photo) throw new AppError(404, 'Photo not found');
+
+    const current = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { avatarUrl: true, avatarVersion: true, isSystemAccount: true },
+    });
+    if (!current) throw new AppError(404, 'User not found');
+    if (current.isSystemAccount) throw new AppError(403, 'System accounts cannot be modified');
+
     await prisma.profileGalleryPhoto.delete({ where: { id: photo.id } });
-    return { success: true, id: photo.id };
+    await uploadService.deleteStoredFile(photo.storageKey);
+
+    const photoUrlBase = photo.url.split('?')[0];
+    const avatarUrlBase = (current.avatarUrl || '').split('?')[0];
+    const wasActiveAvatar =
+      Boolean(current.avatarUrl) &&
+      (avatarUrlBase === photoUrlBase ||
+        (current.avatarUrl || '').includes(photo.storageKey));
+
+    let profile: {
+      id: string;
+      avatarUrl: string | null;
+      avatarVersion: number;
+      avatarId: string;
+      [key: string]: unknown;
+    } | null = null;
+    let clearedAvatar = false;
+
+    if (wasActiveAvatar) {
+      profile = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          avatarUrl: null,
+          avatarVersion: (current.avatarVersion || 0) + 1,
+        },
+        select: ownerProfileSelect,
+      });
+      clearedAvatar = true;
+      await cacheDel(CacheKeys.user(userId), `${CacheKeys.user(userId)}:owner`);
+    }
+
+    return {
+      success: true as const,
+      id: photo.id,
+      clearedAvatar,
+      profile,
+    };
   }
 
   /**

@@ -142,6 +142,13 @@ router.delete(
       req.userId!,
       paramId(req.params.photoId)
     );
+    if (result.clearedAvatar && result.profile) {
+      emitProfileUpdated(
+        req.userId!,
+        result.profile.avatarVersion ?? 0,
+        result.profile.avatarUrl ?? null
+      );
+    }
     res.json(result);
   })
 );
