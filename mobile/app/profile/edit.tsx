@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,38 +24,48 @@ import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
 import { loadAvatarCategories, loadUniversities } from '../../src/services/signupOptions';
 import { validateUsername, validateMobileNumber } from '../../src/utils/validation';
-import { setPendingAvatarPhoto } from '../../src/profile/pendingAvatarPhoto';
-import { kindFromMimeClient, validatePendingAttachment } from '../../src/attachments/pending';
 import { invalidatePublicProfile, setCachedPublicProfile } from '../../src/cache/profileCache';
 import { applyAvatarSyncUpdate } from '../../src/profile/avatarSyncStore';
 import { hasValidAvatarUrl } from '../../src/utils/avatarUrl';
+import {
+  addOwnDpFromAssets,
+  loadOwnDpLibrary,
+  ownDpToPending,
+  removeOwnDpItem,
+  type OwnDpItem,
+} from '../../src/profile/ownDpLibrary';
+import { uploadProfileAvatar } from '../../src/attachments/uploadProfileAvatar';
 import { ProfileSaveSuccessToast } from '../../src/components/ProfileSaveSuccessToast';
 import { Spacing, BorderRadius } from '../../src/theme';
 
 const AVATAR_CATEGORIES = [
-  { key: 'animals', label: 'Animals' },
-  { key: 'nature', label: 'Nature' },
-  { key: 'technology', label: 'Tech' },
-  { key: 'sports', label: 'Sports' },
-  { key: 'education', label: 'Education' },
-  { key: 'minimal', label: 'Minimal' },
+  { key: 'animals', labelKey: 'animals' as const },
+  { key: 'nature', labelKey: 'nature' as const },
+  { key: 'technology', labelKey: 'tech' as const },
+  { key: 'sports', labelKey: 'sports' as const },
+  { key: 'education', labelKey: 'education' as const },
+  { key: 'minimal', labelKey: 'minimal' as const },
+  { key: 'own', labelKey: 'myOwnDp' as const },
 ];
 
 export default function EditProfileScreen() {
   const { user, updateUser, loadUser } = useAuthStore();
   const { colors, fonts, t } = useSettingsStore();
 
-  const initial = useMemo(() => ({
-    firstName: user?.firstName || '',
-    lastName: user?.lastName || '',
-    username: user?.username || '',
-    bio: user?.bio || '',
-    university: user?.university || '',
-    course: user?.course || '',
-    statusMessage: user?.statusMessage || '',
-    mobileNumber: user?.mobileNumber || '',
-    avatarId: user?.avatarId || 'avatar-1',
-  }), [user]);
+  const initial = useMemo(
+    () => ({
+      firstName: user?.firstName || '',
+      lastName: user?.lastName || '',
+      username: user?.username || '',
+      bio: user?.bio || '',
+      university: user?.university || '',
+      course: user?.course || '',
+      statusMessage: user?.statusMessage || '',
+      mobileNumber: user?.mobileNumber || '',
+      avatarId: user?.avatarId || 'avatar-1',
+    }),
+    [user]
+  );
 
   const [firstName, setFirstName] = useState(initial.firstName);
   const [lastName, setLastName] = useState(initial.lastName);
@@ -67,42 +78,49 @@ export default function EditProfileScreen() {
   const [selectedAvatarId, setSelectedAvatarId] = useState(initial.avatarId);
   const [avatarCategories, setAvatarCategories] = useState<Record<string, string[]>>({});
   const [universities, setUniversities] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState('animals');
+  const [selectedCategory, setSelectedCategory] = useState(
+    hasValidAvatarUrl(user?.avatarUrl) ? 'own' : 'animals'
+  );
+  const [ownDps, setOwnDps] = useState<OwnDpItem[]>([]);
+  const [selectedOwnDpId, setSelectedOwnDpId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [clearingPhoto, setClearingPhoto] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [needsAvatarPick, setNeedsAvatarPick] = useState(false);
   const [avatarTouched, setAvatarTouched] = useState(false);
-  /**
-   * When true, preview the selected AO avatar instead of a real photo.
-   * Only set after remove-photo or picking an AO avatar (which clears photo on save).
-   * Default/current profile state always prefers a valid avatarUrl.
-   */
   const [previewAoAvatar, setPreviewAoAvatar] = useState(
     () => !hasValidAvatarUrl(user?.avatarUrl)
   );
-  /** Draft AO selection should not be wiped by a same-URL profile refresh. */
   const aoDraftPreviewRef = useRef(false);
   const lastAvatarVersionRef = useRef(user?.avatarVersion ?? 0);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
 
+  const categoryLabel = useCallback(
+    (key: (typeof AVATAR_CATEGORIES)[number]['labelKey']) => {
+      const map = t.profile.avatarNav || {};
+      return map[key] || key;
+    },
+    [t]
+  );
+
   useEffect(() => {
     loadAvatarCategories().then(setAvatarCategories);
     loadUniversities().then(setUniversities);
+    loadOwnDpLibrary().then(setOwnDps);
   }, []);
 
-  // Keep preview aligned with authoritative profile photo (upload/clear/sync)
   useEffect(() => {
     const version = user?.avatarVersion ?? 0;
     const versionBumped = version > lastAvatarVersionRef.current;
     lastAvatarVersionRef.current = version;
 
     if (hasValidAvatarUrl(user?.avatarUrl)) {
-      // New upload (version bump) always wins; otherwise keep AO draft preview if user is picking
       if (versionBumped || !aoDraftPreviewRef.current) {
         aoDraftPreviewRef.current = false;
         setPreviewAoAvatar(false);
+        if (versionBumped) setSelectedOwnDpId(null);
       }
     } else {
       aoDraftPreviewRef.current = false;
@@ -110,40 +128,48 @@ export default function EditProfileScreen() {
     }
   }, [user?.avatarUrl, user?.avatarVersion]);
 
-  const showRealPhotoPreview = hasValidAvatarUrl(user?.avatarUrl) && !previewAoAvatar;
+  const selectedOwnDp = useMemo(
+    () => ownDps.find((d) => d.id === selectedOwnDpId) || null,
+    [ownDps, selectedOwnDpId]
+  );
 
-  const pickProfilePhoto = async () => {
+  const showRealPhotoPreview =
+    !selectedOwnDp && hasValidAvatarUrl(user?.avatarUrl) && !previewAoAvatar;
+
+  const browseOwnDps = async () => {
+    setBrowsing(true);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(t.common.error, "You don't have permission to access photos.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.9,
+        allowsMultipleSelection: true,
+        selectionLimit: 12,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const next = await addOwnDpFromAssets(result.assets);
+      setOwnDps(next);
+      if (next[0]) {
+        selectOwnDp(next[0].id);
+      }
+      setSelectedCategory('own');
+    } catch (err) {
+      Alert.alert(t.common.error, err instanceof Error ? err.message : t.profile.photoFailed);
+    } finally {
+      setBrowsing(false);
+    }
+  };
+
+  const selectOwnDp = (id: string) => {
+    setSelectedOwnDpId(id);
+    setAvatarTouched(true);
     aoDraftPreviewRef.current = false;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert(t.common.error, "You don't have permission to access photos.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.9,
-      allowsMultipleSelection: false,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
-    const mime = asset.mimeType || 'image/jpeg';
-    const file = {
-      localUri: asset.uri,
-      mimeType: mime,
-      fileName: asset.fileName || 'avatar.jpg',
-      fileSize: asset.fileSize || 0,
-      kind: kindFromMimeClient(mime),
-      width: asset.width,
-      height: asset.height,
-      previewUri: asset.uri,
-    };
-    const err = validatePendingAttachment(file);
-    if (err) {
-      Alert.alert(t.common.error, err);
-      return;
-    }
-    setPendingAvatarPhoto(file);
-    router.push('/profile/avatar-photo' as any);
+    setPreviewAoAvatar(false);
+    setNeedsAvatarPick(false);
   };
 
   const confirmRemoveCustomPhoto = async () => {
@@ -169,10 +195,12 @@ export default function EditProfileScreen() {
           avatarVersion: updated.avatarVersion,
         });
       }
+      setSelectedOwnDpId(null);
       setPreviewAoAvatar(true);
       setNeedsAvatarPick(true);
       setAvatarTouched(false);
       aoDraftPreviewRef.current = false;
+      setSelectedCategory('animals');
       setShowRemoveConfirm(false);
       Alert.alert('', t.profile.photoRemoved);
     } catch (err) {
@@ -184,10 +212,26 @@ export default function EditProfileScreen() {
 
   const selectAoAvatar = (id: string) => {
     setSelectedAvatarId(id);
+    setSelectedOwnDpId(null);
     setAvatarTouched(true);
-    // Selecting AO avatar previews AO and will clear avatarUrl on save
     aoDraftPreviewRef.current = true;
     setPreviewAoAvatar(true);
+    setNeedsAvatarPick(false);
+  };
+
+  const deleteOwnDp = (id: string) => {
+    Alert.alert(t.profile.removeOwnDp, t.profile.removeOwnDpConfirm, [
+      { text: t.common.cancel, style: 'cancel' },
+      {
+        text: t.common.delete,
+        style: 'destructive',
+        onPress: async () => {
+          const next = await removeOwnDpItem(id);
+          setOwnDps(next);
+          if (selectedOwnDpId === id) setSelectedOwnDpId(null);
+        },
+      },
+    ]);
   };
 
   const hasChanges =
@@ -200,7 +244,9 @@ export default function EditProfileScreen() {
     statusMessage !== initial.statusMessage ||
     mobileNumber !== initial.mobileNumber ||
     selectedAvatarId !== initial.avatarId ||
-    (needsAvatarPick && avatarTouched);
+    Boolean(selectedOwnDpId) ||
+    (needsAvatarPick && avatarTouched) ||
+    (previewAoAvatar && avatarTouched && selectedAvatarId !== initial.avatarId);
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -217,7 +263,7 @@ export default function EditProfileScreen() {
   };
 
   const handleSave = async () => {
-    if (needsAvatarPick && !avatarTouched) {
+    if (needsAvatarPick && !avatarTouched && !selectedOwnDpId) {
       Alert.alert('', t.profile.chooseAvatar);
       return;
     }
@@ -241,7 +287,39 @@ export default function EditProfileScreen() {
 
     setLoading(true);
     try {
-      const updated = await api.updateProfile({
+      // Apply selected own DP as profile photo first
+      if (selectedOwnDp) {
+        const updatedPhoto = await uploadProfileAvatar(ownDpToPending(selectedOwnDp));
+        updateUser(updatedPhoto);
+        if (updatedPhoto.id) {
+          applyAvatarSyncUpdate({
+            userId: updatedPhoto.id,
+            avatarUrl: updatedPhoto.avatarUrl ?? null,
+            avatarVersion: updatedPhoto.avatarVersion ?? 0,
+          });
+          invalidatePublicProfile(updatedPhoto.id);
+          setCachedPublicProfile({
+            id: updatedPhoto.id,
+            username: updatedPhoto.username,
+            firstName: updatedPhoto.firstName,
+            lastName: updatedPhoto.lastName,
+            avatarId: updatedPhoto.avatarId || 'avatar-1',
+            avatarUrl: updatedPhoto.avatarUrl,
+            avatarVersion: updatedPhoto.avatarVersion,
+            university: updatedPhoto.university,
+            course: updatedPhoto.course,
+            bio: updatedPhoto.bio,
+            status: updatedPhoto.status,
+            statusMessage: updatedPhoto.statusMessage,
+            lastSeen: updatedPhoto.lastSeen,
+            isVerified: updatedPhoto.isVerified,
+          });
+        }
+        aoDraftPreviewRef.current = false;
+        setPreviewAoAvatar(false);
+      }
+
+      const profilePayload: Record<string, unknown> = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         username: username.trim().toLowerCase(),
@@ -250,35 +328,41 @@ export default function EditProfileScreen() {
         course: course.trim() || undefined,
         statusMessage: statusMessage.trim() || undefined,
         mobileNumber: mobileNumber.trim() || '',
-        avatarId: selectedAvatarId,
-      }) as Record<string, unknown>;
+      };
+
+      // Only send avatarId when user picked an AO avatar (clears custom photo on server)
+      if (!selectedOwnDp && (aoDraftPreviewRef.current || (avatarTouched && previewAoAvatar))) {
+        profilePayload.avatarId = selectedAvatarId;
+      }
+
+      const updated = (await api.updateProfile(profilePayload)) as Record<string, unknown>;
       updateUser(updated as Parameters<typeof updateUser>[0]);
       if (typeof updated.id === 'string') {
         invalidatePublicProfile(updated.id);
-        applyAvatarSyncUpdate({
-          userId: updated.id,
-          avatarUrl: (updated.avatarUrl as string | null | undefined) ?? null,
-          avatarVersion:
-            typeof updated.avatarVersion === 'number'
-              ? updated.avatarVersion
-              : user?.avatarVersion ?? 0,
-        });
+        if (profilePayload.avatarId) {
+          applyAvatarSyncUpdate({
+            userId: updated.id,
+            avatarUrl: (updated.avatarUrl as string | null | undefined) ?? null,
+            avatarVersion:
+              typeof updated.avatarVersion === 'number'
+                ? updated.avatarVersion
+                : user?.avatarVersion ?? 0,
+          });
+        }
       }
-      const refreshed = await loadUser();
-      if (!refreshed) {
-        // Local update already applied — still treat as saved
-      }
+      await loadUser();
       setNeedsAvatarPick(false);
       setAvatarTouched(false);
+      setSelectedOwnDpId(null);
       aoDraftPreviewRef.current = false;
-      setPreviewAoAvatar(!hasValidAvatarUrl((updated as { avatarUrl?: string | null }).avatarUrl));
+      setPreviewAoAvatar(!hasValidAvatarUrl(useAuthStore.getState().user?.avatarUrl));
       setShowSaveSuccess(true);
     } catch (err) {
       const message =
         err instanceof Error
-          ? (/unexpected/i.test(err.message)
-              ? 'Could not save your profile. Please try again.'
-              : err.message)
+          ? /unexpected/i.test(err.message)
+            ? 'Could not save your profile. Please try again.'
+            : err.message
           : t.common.error;
       Alert.alert('Error', message);
     } finally {
@@ -301,27 +385,29 @@ export default function EditProfileScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.avatarSection}>
-            <Avatar
-              userId={showRealPhotoPreview ? user?.id : undefined}
-              avatarId={selectedAvatarId}
-              imageUrl={showRealPhotoPreview ? user?.avatarUrl : null}
-              imageVersion={user?.avatarVersion}
-              size={88}
-            />
-            <TouchableOpacity
-              style={[styles.changePhotoBtn, { backgroundColor: colors.surfaceSecondary }]}
-              onPress={pickProfilePhoto}
-            >
-              <Ionicons name="camera-outline" size={16} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontSize: fonts.sm, fontWeight: '600' }}>
-                {t.profile.changePhoto}
-              </Text>
-            </TouchableOpacity>
+            {selectedOwnDp ? (
+              <View
+                style={[
+                  styles.previewRing,
+                  { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+                ]}
+              >
+                <Image source={{ uri: selectedOwnDp.localUri }} style={styles.previewImage} />
+              </View>
+            ) : (
+              <Avatar
+                userId={showRealPhotoPreview ? user?.id : undefined}
+                avatarId={selectedAvatarId}
+                imageUrl={showRealPhotoPreview ? user?.avatarUrl : null}
+                imageVersion={user?.avatarVersion}
+                size={88}
+              />
+            )}
             {showRealPhotoPreview ? (
               <TouchableOpacity
                 onPress={() => setShowRemoveConfirm(true)}
                 disabled={clearingPhoto}
-                style={{ marginTop: Spacing.xs }}
+                style={{ marginTop: Spacing.sm }}
               >
                 <Text style={{ color: colors.danger, fontSize: fonts.xs }}>
                   {clearingPhoto ? t.common.loading : t.profile.removePhoto}
@@ -338,52 +424,117 @@ export default function EditProfileScreen() {
                 },
               ]}
             >
-              {needsAvatarPick || !showRealPhotoPreview
-                ? t.profile.chooseAvatar
-                : t.profile.useAoAvatar}
+              {t.profile.chooseAvatar}
             </Text>
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-            {AVATAR_CATEGORIES.map((cat) => (
-              <TouchableOpacity
-                key={cat.key}
-                style={[styles.categoryChip, { backgroundColor: selectedCategory === cat.key ? colors.primary : colors.surfaceSecondary }]}
-                onPress={() => setSelectedCategory(cat.key)}
-              >
-                <Text style={{ color: selectedCategory === cat.key ? '#FFF' : colors.text, fontSize: 12, fontWeight: '500' }}>
-                  {cat.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-
-          <View style={styles.avatarGrid}>
-            {(avatarCategories[selectedCategory] || []).map((id) => {
-              const isSelected = selectedAvatarId === id;
+            {AVATAR_CATEGORIES.map((cat) => {
+              const active = selectedCategory === cat.key;
               return (
                 <TouchableOpacity
-                  key={id}
-                  onPress={() => selectAoAvatar(id)}
+                  key={cat.key}
                   style={[
-                    styles.avatarItem,
+                    styles.categoryChip,
                     {
-                      borderColor: isSelected ? colors.primary : 'transparent',
-                      borderWidth: 3,
+                      backgroundColor: active ? colors.primary : colors.surfaceSecondary,
                     },
                   ]}
-                  accessibilityState={{ selected: isSelected }}
+                  onPress={() => setSelectedCategory(cat.key)}
                 >
-                  <Avatar avatarId={id} size={52} />
-                  {isSelected ? (
-                    <View style={[styles.avatarCheck, { backgroundColor: colors.primary }]}>
-                      <Ionicons name="checkmark" size={12} color="#FFF" />
-                    </View>
-                  ) : null}
+                  <Text
+                    style={{
+                      color: active ? '#FFF' : colors.text,
+                      fontSize: 12,
+                      fontWeight: '600',
+                    }}
+                  >
+                    {categoryLabel(cat.labelKey)}
+                  </Text>
                 </TouchableOpacity>
               );
             })}
-          </View>
+          </ScrollView>
+
+          {selectedCategory === 'own' ? (
+            <View style={styles.avatarGrid}>
+              <TouchableOpacity
+                onPress={browseOwnDps}
+                disabled={browsing || loading}
+                style={[
+                  styles.browseTile,
+                  {
+                    backgroundColor: colors.surfaceSecondary,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Ionicons name="images-outline" size={22} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontSize: fonts.xs, fontWeight: '600', marginTop: 4 }}>
+                  {browsing ? t.common.loading : t.profile.browseOwnDp}
+                </Text>
+              </TouchableOpacity>
+
+              {ownDps.map((item) => {
+                const isSelected = selectedOwnDpId === item.id;
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    onPress={() => selectOwnDp(item.id)}
+                    onLongPress={() => deleteOwnDp(item.id)}
+                    style={[
+                      styles.ownDpItem,
+                      {
+                        borderColor: isSelected ? colors.primary : 'transparent',
+                        borderWidth: 3,
+                      },
+                    ]}
+                    accessibilityState={{ selected: isSelected }}
+                  >
+                    <Image source={{ uri: item.localUri }} style={styles.ownDpImage} />
+                    {isSelected ? (
+                      <View style={[styles.avatarCheck, { backgroundColor: colors.primary }]}>
+                        <Ionicons name="checkmark" size={12} color="#FFF" />
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : (
+            <View style={styles.avatarGrid}>
+              {(avatarCategories[selectedCategory] || []).map((id) => {
+                const isSelected = selectedAvatarId === id && previewAoAvatar && !selectedOwnDpId;
+                return (
+                  <TouchableOpacity
+                    key={id}
+                    onPress={() => selectAoAvatar(id)}
+                    style={[
+                      styles.avatarItem,
+                      {
+                        borderColor: isSelected ? colors.primary : 'transparent',
+                        borderWidth: 3,
+                      },
+                    ]}
+                    accessibilityState={{ selected: isSelected }}
+                  >
+                    <Avatar avatarId={id} size={52} />
+                    {isSelected ? (
+                      <View style={[styles.avatarCheck, { backgroundColor: colors.primary }]}>
+                        <Ionicons name="checkmark" size={12} color="#FFF" />
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {selectedCategory === 'own' ? (
+            <Text style={[styles.hint, { color: colors.textTertiary, fontSize: fonts.xs }]}>
+              {t.profile.ownDpHint}
+            </Text>
+          ) : null}
 
           <Input label={t.auth.firstName} value={firstName} onChangeText={setFirstName} error={errors.firstName} />
           <Input label={t.auth.lastName} value={lastName} onChangeText={setLastName} error={errors.lastName} />
@@ -484,15 +635,14 @@ const styles = StyleSheet.create({
   headerTitle: { fontWeight: '700' },
   scroll: { padding: Spacing.lg, paddingBottom: Spacing.xxl },
   avatarSection: { alignItems: 'center', marginBottom: Spacing.md },
-  changePhotoBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
+  previewRing: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    overflow: 'hidden',
+    borderWidth: 1,
   },
+  previewImage: { width: '100%', height: '100%' },
   categoryScroll: { marginBottom: Spacing.md },
   categoryChip: {
     paddingHorizontal: Spacing.md,
@@ -513,6 +663,28 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: 'transparent',
     position: 'relative',
+  },
+  browseTile: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  ownDpItem: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    padding: 2,
+    position: 'relative',
+  },
+  ownDpImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 34,
   },
   avatarCheck: {
     position: 'absolute',
@@ -535,5 +707,5 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
     marginBottom: Spacing.sm,
   },
-  hint: { marginTop: -Spacing.sm, marginBottom: Spacing.md },
+  hint: { marginTop: -Spacing.sm, marginBottom: Spacing.md, textAlign: 'center' },
 });
