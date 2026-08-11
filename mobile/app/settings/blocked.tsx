@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../../src/components/Avatar';
+import { ActionMenuSheet } from '../../src/components/ActionMenuSheet';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { api } from '../../src/services/api';
+import { cacheManager, CacheDomain } from '../../src/cache';
 import { Spacing } from '../../src/theme';
 
 interface BlockedUser {
@@ -21,6 +23,8 @@ interface BlockedUser {
 export default function BlockedUsersScreen() {
   const { colors, fonts, t } = useSettingsStore();
   const [blocked, setBlocked] = useState<BlockedUser[]>([]);
+  const [pendingUnblock, setPendingUnblock] = useState<BlockedUser | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.getBlockedUsers()
@@ -28,18 +32,58 @@ export default function BlockedUsersScreen() {
       .catch(() => {});
   }, []);
 
-  const handleUnblock = (userId: string) => {
-    Alert.alert(t.friends.unblock, undefined, [
-      { text: t.common.cancel, style: 'cancel' },
-      {
-        text: t.friends.unblock,
-        onPress: async () => {
-          await api.unblockUser(userId);
-          setBlocked((prev) => prev.filter((u) => u.id !== userId));
-        },
-      },
-    ]);
-  };
+  const finishUnblock = useCallback(
+    async (user: BlockedUser, restoreHistory: boolean) => {
+      if (busy) return;
+      setBusy(true);
+      setPendingUnblock(null);
+      try {
+        const result = await api.unblockUser(user.id, { restoreHistory });
+        setBlocked((prev) => prev.filter((u) => u.id !== user.id));
+        // Force chat list to reload conversation (restored or empty)
+        cacheManager.remove(CacheDomain.CONVERSATIONS);
+        if (result.conversationId && !restoreHistory) {
+          await cacheManager.clearConversationMessages(result.conversationId);
+        }
+        Alert.alert(
+          '',
+          restoreHistory ? t.friends.unblockRestored : t.friends.unblockEmptied
+        );
+      } catch (err) {
+        Alert.alert(
+          t.common.error,
+          err instanceof Error ? err.message : t.friends.unblockFailed
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, t]
+  );
+
+  const unblockMenuItems = useMemo(
+    () =>
+      pendingUnblock
+        ? [
+            {
+              key: 'restore',
+              label: t.friends.unblockRestoreChat,
+              onPress: () => {
+                void finishUnblock(pendingUnblock, true);
+              },
+            },
+            {
+              key: 'empty',
+              label: t.friends.unblockEmptyChat,
+              destructive: true,
+              onPress: () => {
+                void finishUnblock(pendingUnblock, false);
+              },
+            },
+          ]
+        : [],
+    [pendingUnblock, t, finishUnblock]
+  );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -71,7 +115,10 @@ export default function BlockedUsersScreen() {
               </Text>
               <Text style={{ color: colors.textSecondary, fontSize: fonts.sm }}>@{item.username}</Text>
             </View>
-            <TouchableOpacity onPress={() => handleUnblock(item.id)}>
+            <TouchableOpacity
+              onPress={() => setPendingUnblock(item)}
+              disabled={busy}
+            >
               <Text style={{ color: colors.primary, fontWeight: '600', fontSize: fonts.sm }}>
                 {t.friends.unblock}
               </Text>
@@ -83,6 +130,22 @@ export default function BlockedUsersScreen() {
             <Text style={{ color: colors.textSecondary }}>{t.common.noResults}</Text>
           </View>
         }
+      />
+
+      <ActionMenuSheet
+        visible={Boolean(pendingUnblock)}
+        title={
+          pendingUnblock
+            ? `${t.friends.unblock} ${pendingUnblock.firstName}?\n${t.friends.unblockHistoryPrompt}`
+            : t.friends.unblock
+        }
+        items={unblockMenuItems}
+        onClose={() => {
+          if (!busy) setPendingUnblock(null);
+        }}
+        colors={colors}
+        fonts={fonts}
+        cancelLabel={t.common.cancel}
       />
     </SafeAreaView>
   );

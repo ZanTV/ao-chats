@@ -21,7 +21,7 @@ import {
   setCachedPublicProfile,
   type PublicProfileCache,
 } from '../../src/cache/profileCache';
-import { bustAvatarUrl, hasValidAvatarUrl } from '../../src/utils/avatarUrl';
+import { hasValidAvatarUrl, resolveAvatarDisplayUrl } from '../../src/utils/avatarUrl';
 import { useAvatarSyncStore } from '../../src/profile/avatarSyncStore';
 import { Spacing } from '../../src/theme';
 
@@ -117,7 +117,7 @@ export default function ProfilePhotoViewScreen() {
     synced?.urlKnown && synced.avatarVersion >= (profile?.avatarVersion ?? 0)
       ? synced.avatarVersion
       : profile?.avatarVersion;
-  const displayUrl = bustAvatarUrl(resolvedUrl, resolvedVersion);
+  const displayUrl = resolveAvatarDisplayUrl(resolvedUrl, resolvedVersion);
 
   useEffect(() => {
     setImageFailed(false);

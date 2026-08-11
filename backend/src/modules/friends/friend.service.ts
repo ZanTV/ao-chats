@@ -3,12 +3,15 @@ import {
   cacheDel,
   cacheGetVersioned,
   cacheSetVersioned,
+  cacheInvalidatePattern,
   CacheKeys,
   CacheTTL,
 } from '../../config/redis';
 import { AppError } from '../../middleware/errorHandler';
 import { notificationService } from '../notifications/notification.service';
 import { getIO } from '../../sockets';
+import { directConversationPairKey } from '../../utils/conversation.utils';
+import { userService } from '../users/user.service';
 
 async function assertNotSystemAccount(userId: string) {
   const user = await prisma.user.findUnique({
@@ -19,7 +22,6 @@ async function assertNotSystemAccount(userId: string) {
     throw new AppError(403, 'This official account cannot be modified');
   }
 }
-import { userService } from '../users/user.service';
 
 export class FriendService {
   async sendRequest(senderId: string, receiverId: string) {
@@ -276,9 +278,53 @@ export class FriendService {
     return { message: 'User blocked' };
   }
 
-  async unblockUser(blockerId: string, blockedId: string) {
+  async unblockUser(
+    blockerId: string,
+    blockedId: string,
+    options?: { restoreHistory?: boolean }
+  ) {
+    const restoreHistory = options?.restoreHistory === true;
+
     await prisma.block.deleteMany({ where: { blockerId, blockedId } });
-    return { message: 'User unblocked' };
+
+    const pairKey = directConversationPairKey(blockerId, blockedId);
+    const conversation = await prisma.conversation.findFirst({
+      where: { isGroup: false, directPairKey: pairKey },
+      select: { id: true },
+    });
+
+    let conversationId: string | null = null;
+    if (conversation) {
+      conversationId = conversation.id;
+      const now = new Date();
+      await prisma.participant.updateMany({
+        where: { conversationId: conversation.id, userId: blockerId },
+        data: restoreHistory
+          ? {
+              // Show chat again with previous messages
+              hiddenAt: null,
+              clearedAt: null,
+            }
+          : {
+              // Show chat again but empty for this user
+              hiddenAt: null,
+              clearedAt: now,
+              lastReadAt: now,
+            },
+      });
+
+      await cacheDel(CacheKeys.userConversations(blockerId));
+      await cacheInvalidatePattern(`${CacheKeys.messages(conversation.id)}:*`);
+      await cacheInvalidatePattern(`${CacheKeys.pinnedMessages(conversation.id)}:*`);
+    }
+
+    await cacheDel(CacheKeys.userFriends(blockerId), CacheKeys.userFriends(blockedId));
+
+    return {
+      message: 'User unblocked',
+      conversationId,
+      restoreHistory,
+    };
   }
 
   async getBlockedUsers(userId: string) {

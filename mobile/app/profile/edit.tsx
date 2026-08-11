@@ -84,6 +84,7 @@ export default function EditProfileScreen() {
   );
   /** Draft AO selection should not be wiped by a same-URL profile refresh. */
   const aoDraftPreviewRef = useRef(false);
+  const lastAvatarVersionRef = useRef(user?.avatarVersion ?? 0);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
 
   useEffect(() => {
@@ -93,9 +94,16 @@ export default function EditProfileScreen() {
 
   // Keep preview aligned with authoritative profile photo (upload/clear/sync)
   useEffect(() => {
+    const version = user?.avatarVersion ?? 0;
+    const versionBumped = version > lastAvatarVersionRef.current;
+    lastAvatarVersionRef.current = version;
+
     if (hasValidAvatarUrl(user?.avatarUrl)) {
-      if (aoDraftPreviewRef.current) return;
-      setPreviewAoAvatar(false);
+      // New upload (version bump) always wins; otherwise keep AO draft preview if user is picking
+      if (versionBumped || !aoDraftPreviewRef.current) {
+        aoDraftPreviewRef.current = false;
+        setPreviewAoAvatar(false);
+      }
     } else {
       aoDraftPreviewRef.current = false;
       setPreviewAoAvatar(true);

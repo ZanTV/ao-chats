@@ -97,7 +97,9 @@ function normalizeId(id: string | string[] | undefined): string | undefined {
   return Array.isArray(id) ? id[0] : id;
 }
 
-const MessageList = Platform.OS === 'web' ? RNFlatList : GHFlatList;
+// RN FlatList on web; GH FlatList on native (better gesture nesting). Assert as RN
+// FlatList so the shared ref type typechecks — runtime component is unchanged.
+const MessageList = (Platform.OS === 'web' ? RNFlatList : GHFlatList) as typeof RNFlatList;
 
 export default function ChatScreen() {
   const params = useLocalSearchParams<{ id: string; highlight?: string }>();

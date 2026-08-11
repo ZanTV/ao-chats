@@ -41,7 +41,23 @@ export function uploadProfileAvatar(
       xhr.onload = () => {
         signal?.removeEventListener('abort', abort);
         const status = xhr.status;
-        const body = (xhr.response || {}) as Record<string, unknown>;
+        let body: Record<string, unknown> = {};
+        const raw = xhr.response;
+        if (raw && typeof raw === 'object') {
+          body = raw as Record<string, unknown>;
+        } else if (typeof raw === 'string' && raw.trim()) {
+          try {
+            body = JSON.parse(raw) as Record<string, unknown>;
+          } catch {
+            body = {};
+          }
+        } else if (typeof xhr.responseText === 'string' && xhr.responseText.trim()) {
+          try {
+            body = JSON.parse(xhr.responseText) as Record<string, unknown>;
+          } catch {
+            body = {};
+          }
+        }
         if (status >= 200 && status < 300) {
           onProgress?.(100);
           resolve(body as unknown as User);

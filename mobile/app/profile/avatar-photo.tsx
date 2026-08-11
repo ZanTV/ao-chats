@@ -47,15 +47,17 @@ export default function AvatarPhotoPreviewScreen() {
     router.back();
   };
 
-  const applySavedProfile = (updated: User) => {
+  const applySavedProfile = (updated: User, localPreviewUri?: string | null) => {
     if (!updated?.avatarUrl) {
       throw new Error(t.profile.photoSaveFailed);
     }
+    // Auth / cache keep the server proxy URL (source of truth for other clients).
     updateUser(updated);
     if (updated.id) {
+      // Sync store prefers the local device URI first so AO avatar is replaced instantly.
       applyAvatarSyncUpdate({
         userId: updated.id,
-        avatarUrl: updated.avatarUrl ?? null,
+        avatarUrl: localPreviewUri || updated.avatarUrl,
         avatarVersion: updated.avatarVersion ?? 0,
       });
       invalidatePublicProfile(updated.id);
@@ -75,6 +77,19 @@ export default function AvatarPhotoPreviewScreen() {
         lastSeen: updated.lastSeen,
         isVerified: updated.isVerified,
       });
+      // After a short beat, promote sync to the proxy URL (same version) for consistency.
+      if (localPreviewUri) {
+        const userId = updated.id;
+        const remoteUrl = updated.avatarUrl;
+        const version = updated.avatarVersion ?? 0;
+        setTimeout(() => {
+          applyAvatarSyncUpdate({
+            userId,
+            avatarUrl: remoteUrl,
+            avatarVersion: version,
+          });
+        }, 400);
+      }
     }
   };
 
@@ -84,7 +99,7 @@ export default function AvatarPhotoPreviewScreen() {
     setSaving(true);
     try {
       const updated = await uploadProfileAvatar(pending, (p) => setProgress(p));
-      applySavedProfile(updated);
+      applySavedProfile(updated, pending.localUri || uri);
       setShowSuccess(true);
     } catch (err) {
       setPendingAvatarPhoto(pending);

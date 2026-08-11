@@ -4,6 +4,7 @@ import { authenticate, AuthRequest } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/errorHandler';
 import { paramId } from '../../utils/params';
 import { getIO } from '../../sockets';
+import { emitConversationUpdated } from '../../sockets/conversation.events';
 
 const router = Router();
 
@@ -96,7 +97,30 @@ router.post(
 router.delete(
   '/block/:userId',
   asyncHandler(async (req: AuthRequest, res) => {
-    const result = await friendService.unblockUser(req.userId!, paramId(req.params.userId));
+    const blockedId = paramId(req.params.userId);
+    const restoreHistory = req.body?.restoreHistory === true;
+    const result = await friendService.unblockUser(req.userId!, blockedId, {
+      restoreHistory,
+    });
+    const io = getIO();
+    if (io) {
+      const payload = {
+        blockerId: req.userId,
+        blockedId,
+        conversationId: result.conversationId,
+        restoreHistory: result.restoreHistory,
+      };
+      io.to(`user:${req.userId}`).emit('user:unblocked', payload);
+      io.to(`user:${blockedId}`).emit('user:unblocked', payload);
+      if (result.conversationId) {
+        await emitConversationUpdated(io, result.conversationId, undefined, {
+          targetUserId: req.userId!,
+          unreadCount: 0,
+          clearLastMessage: !result.restoreHistory,
+          removeFromList: false,
+        });
+      }
+    }
     res.json(result);
   })
 );

@@ -264,8 +264,15 @@ class ApiClient {
     this.request(`/friends/${friendId}`, { method: 'DELETE' });
   blockUser = (userId: string) =>
     this.request(`/friends/block/${userId}`, { method: 'POST' });
-  unblockUser = (userId: string) =>
-    this.request(`/friends/block/${userId}`, { method: 'DELETE' });
+  unblockUser = (userId: string, options?: { restoreHistory?: boolean }) =>
+    this.request<{
+      message: string;
+      conversationId?: string | null;
+      restoreHistory?: boolean;
+    }>(`/friends/block/${userId}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ restoreHistory: options?.restoreHistory === true }),
+    });
   getBlockedUsers = () => this.request('/friends/blocked');
 
   // Conversations

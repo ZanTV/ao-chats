@@ -4,12 +4,13 @@ import {
   Text,
   StyleSheet,
   ViewStyle,
+  Image,
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AvatarColors, AvatarEmojis, BorderRadius } from '../theme';
 import { getAccessToken } from '../services/storage';
-import { bustAvatarUrl, normalizeAvatarUrl } from '../utils/avatarUrl';
+import { normalizeAvatarUrl, resolveAvatarDisplayUrl } from '../utils/avatarUrl';
 import { useAvatarSyncStore } from '../profile/avatarSyncStore';
 
 interface AvatarProps {
@@ -28,9 +29,20 @@ interface AvatarProps {
 
 const FADE_MS = 200;
 
+function isLocalUri(url: string): boolean {
+  return (
+    url.startsWith('file:') ||
+    url.startsWith('content:') ||
+    url.startsWith('blob:') ||
+    url.startsWith('data:') ||
+    url.startsWith('ph://') ||
+    url.startsWith('assets-library:')
+  );
+}
+
 /**
  * Precedence: valid avatarUrl (realtime sync or props) > AO avatarId emoji.
- * AO emoji stays as underlay so photo↔AO transitions never blank the circle.
+ * Real photo covers AO underlay once loaded — AO must not stay as the visible avatar.
  */
 export function Avatar({
   avatarId,
@@ -59,22 +71,22 @@ export function Avatar({
   let effectiveUrl = propUrl;
   let effectiveVersion = propVersion;
   if (synced?.urlKnown) {
-    if (synced.avatarVersion > propVersion) {
-      effectiveUrl = normalizeAvatarUrl(synced.avatarUrl);
-      effectiveVersion = synced.avatarVersion;
-    } else if (synced.avatarVersion === propVersion) {
+    if (synced.avatarVersion >= propVersion) {
       effectiveUrl = normalizeAvatarUrl(synced.avatarUrl);
       effectiveVersion = synced.avatarVersion;
     }
   }
 
-  const displayUrl = bustAvatarUrl(effectiveUrl, effectiveVersion);
+  const displayUrl = resolveAvatarDisplayUrl(effectiveUrl, effectiveVersion);
+  const needsAuth = Boolean(displayUrl && !isLocalUri(displayUrl));
 
   const [authHeaders, setAuthHeaders] = useState<Record<string, string> | undefined>();
   const authHeadersRef = useRef<Record<string, string> | undefined>(undefined);
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
   const [baseFailed, setBaseFailed] = useState(false);
+  /** True once a real photo fully covers the AO underlay. */
+  const [photoCoversAo, setPhotoCoversAo] = useState(false);
   const overlayFade = useRef(new Animated.Value(0)).current;
   const photoFade = useRef(new Animated.Value(0)).current;
   const baseUrlRef = useRef<string | null>(null);
@@ -93,8 +105,13 @@ export function Avatar({
     displayUrlRef.current = displayUrl;
   }, [displayUrl]);
 
-  // Sticky auth headers — never blank the avatar while token resolves
+  // Sticky auth headers for proxy URLs — local device URIs need none
   useEffect(() => {
+    if (!needsAuth) {
+      authHeadersRef.current = undefined;
+      setAuthHeaders(undefined);
+      return;
+    }
     let cancelled = false;
     getAccessToken().then((token) => {
       if (cancelled || !token) return;
@@ -105,16 +122,17 @@ export function Avatar({
     return () => {
       cancelled = true;
     };
-  }, [displayUrl]);
+  }, [displayUrl, needsAuth]);
 
   useEffect(() => {
     const next = displayUrl;
 
-    // Real photo → AO avatar: fade photo out over emoji underlay
+    // Real photo → AO avatar: fade photo out, reveal AO
     if (!next) {
       overlayFade.stopAnimation();
       overlayFade.setValue(0);
       setOverlayUrl(null);
+      setPhotoCoversAo(false);
       if (!baseUrlRef.current) {
         photoFade.setValue(0);
         setBaseFailed(false);
@@ -133,40 +151,43 @@ export function Avatar({
       return;
     }
 
-    // Same as what we already show
     if (next === baseUrlRef.current || next === overlayUrlRef.current) {
       return;
     }
 
-    // First paint / recover failure: load as base, fade in over AO emoji
+    // First paint / recover: load base photo (Image stays opacity 1; wrapper fades)
     if (!baseUrlRef.current || baseFailed) {
       overlayFade.stopAnimation();
       overlayFade.setValue(0);
       setOverlayUrl(null);
       setBaseFailed(false);
+      setPhotoCoversAo(false);
       photoFade.setValue(0);
       setBaseUrl(next);
       return;
     }
 
-    // Photo A → Photo B: keep A, crossfade B
+    // Photo A → Photo B
     overlayFade.stopAnimation();
     overlayFade.setValue(0);
     setOverlayUrl(next);
   }, [displayUrl, baseFailed, overlayFade, photoFade]);
 
-  const onBaseLoaded = (loadedUrl: string) => {
-    if (loadedUrl !== baseUrlRef.current) return;
-    if (overlayUrlRef.current) {
-      // Waiting for overlay promote — keep base visible
-      return;
-    }
-    if (displayUrlRef.current !== loadedUrl) return;
+  const revealPhoto = () => {
     Animated.timing(photoFade, {
       toValue: 1,
       duration: FADE_MS,
       useNativeDriver: true,
-    }).start();
+    }).start(({ finished }) => {
+      if (finished) setPhotoCoversAo(true);
+    });
+  };
+
+  const onBaseLoaded = (loadedUrl: string) => {
+    if (loadedUrl !== baseUrlRef.current) return;
+    if (overlayUrlRef.current) return;
+    if (displayUrlRef.current !== loadedUrl) return;
+    revealPhoto();
   };
 
   const promoteOverlay = (loadedUrl: string) => {
@@ -181,6 +202,7 @@ export function Avatar({
       if (!finished) return;
       if (overlayUrlRef.current !== loadedUrl) return;
       photoFade.setValue(1);
+      setPhotoCoversAo(true);
       setBaseFailed(false);
       setBaseUrl(loadedUrl);
       setTimeout(() => {
@@ -198,11 +220,18 @@ export function Avatar({
     setOverlayUrl(null);
     overlayFade.setValue(0);
     photoFade.setValue(1);
+    setPhotoCoversAo(true);
   };
 
-  const headers = authHeaders || authHeadersRef.current;
-  const showBase = Boolean(baseUrl) && !baseFailed && !!headers;
-  const showOverlay = Boolean(overlayUrl) && !!headers;
+  const headers = needsAuth ? authHeaders || authHeadersRef.current : undefined;
+  const canShowRemote = !needsAuth || !!headers;
+  const showBase = Boolean(baseUrl) && !baseFailed && canShowRemote;
+  const showOverlay = Boolean(overlayUrl) && canShowRemote;
+  // Hide AO once real photo covers it — never leave AO as the visible profile face
+  const showEmoji = !photoCoversAo;
+
+  const imageSource = (uri: string) =>
+    headers ? { uri, headers } : { uri };
 
   return (
     <View style={[{ width: size, height: size }, style]}>
@@ -218,48 +247,61 @@ export function Avatar({
           },
         ]}
       >
-        {/* AO avatar underlay — never remove while a photo is loading/clearing */}
-        <Text style={{ fontSize: size * 0.45 }}>{emoji}</Text>
+        {showEmoji ? (
+          <Text style={{ fontSize: size * 0.45 }}>{emoji}</Text>
+        ) : null}
 
         {showBase ? (
-          <Animated.Image
-            source={{ uri: baseUrl!, headers }}
-            style={[
-              styles.layer,
-              { width: size, height: size, opacity: photoFade },
-            ]}
-            onLoad={() => {
-              onBaseLoaded(baseUrl!);
-              finishPromote(baseUrl!);
-            }}
-            onError={() => {
-              setBaseFailed(true);
-              photoFade.setValue(0);
-            }}
-            accessibilityIgnoresInvertColors
-          />
+          <Animated.View
+            style={[styles.layer, { width: size, height: size, opacity: photoFade }]}
+            pointerEvents="none"
+          >
+            <Image
+              source={imageSource(baseUrl!)}
+              style={{ width: size, height: size }}
+              onLoad={() => {
+                onBaseLoaded(baseUrl!);
+                finishPromote(baseUrl!);
+              }}
+              onError={() => {
+                // Local device preview failed — fall back to server proxy URL from props
+                if (baseUrl && isLocalUri(baseUrl) && propUrl) {
+                  const fallback = resolveAvatarDisplayUrl(propUrl, propVersion);
+                  if (fallback && fallback !== baseUrl) {
+                    setPhotoCoversAo(false);
+                    photoFade.setValue(0);
+                    setBaseFailed(false);
+                    setBaseUrl(fallback);
+                    return;
+                  }
+                }
+                setBaseFailed(true);
+                setPhotoCoversAo(false);
+                photoFade.setValue(0);
+              }}
+              accessibilityIgnoresInvertColors
+            />
+          </Animated.View>
         ) : null}
 
         {showOverlay ? (
-          <Animated.Image
-            source={{ uri: overlayUrl!, headers }}
-            style={[
-              styles.layer,
-              {
-                width: size,
-                height: size,
-                opacity: overlayFade,
-              },
-            ]}
-            onLoad={() => promoteOverlay(overlayUrl!)}
-            onError={() => {
-              if (overlayUrlRef.current) {
-                setOverlayUrl(null);
-                overlayFade.setValue(0);
-              }
-            }}
-            accessibilityIgnoresInvertColors
-          />
+          <Animated.View
+            style={[styles.layer, { width: size, height: size, opacity: overlayFade }]}
+            pointerEvents="none"
+          >
+            <Image
+              source={imageSource(overlayUrl!)}
+              style={{ width: size, height: size }}
+              onLoad={() => promoteOverlay(overlayUrl!)}
+              onError={() => {
+                if (overlayUrlRef.current) {
+                  setOverlayUrl(null);
+                  overlayFade.setValue(0);
+                }
+              }}
+              accessibilityIgnoresInvertColors
+            />
+          </Animated.View>
         ) : null}
       </View>
       {showOnline && (
